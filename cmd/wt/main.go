@@ -8,6 +8,7 @@ import (
 
 	"github.com/badri/wt/internal/bead"
 	"github.com/badri/wt/internal/config"
+	"github.com/badri/wt/internal/events"
 	"github.com/badri/wt/internal/merge"
 	"github.com/badri/wt/internal/monitor"
 	"github.com/badri/wt/internal/namepool"
@@ -62,6 +63,8 @@ func run() error {
 		return cmdAbandon(cfg)
 	case "watch":
 		return cmdWatch(cfg)
+	case "seance":
+		return cmdSeance(cfg, args[1:])
 	case "projects":
 		return cmdProjects(cfg)
 	case "ready":
@@ -301,6 +304,10 @@ func cmdNew(cfg *config.Config, args []string) error {
 		return fmt.Errorf("saving state: %w", err)
 	}
 
+	// Log session start event
+	eventLogger := events.NewLogger(cfg)
+	eventLogger.LogSessionStart(sessionName, beadID, projectName, worktreePath)
+
 	fmt.Printf("\nSession '%s' ready.\n", sessionName)
 	fmt.Printf("  Bead:     %s\n", beadID)
 	fmt.Printf("  Worktree: %s\n", worktreePath)
@@ -386,6 +393,10 @@ func cmdKill(cfg *config.Config, name string, flags killFlags) error {
 			fmt.Printf("  Warning: %v\n", err)
 		}
 	}
+
+	// Log session kill event
+	eventLogger := events.NewLogger(cfg)
+	eventLogger.LogSessionKill(name, sess.Bead, sess.Project)
 
 	// Remove from state
 	delete(state.Sessions, name)
@@ -794,6 +805,8 @@ func cmdDone(cfg *config.Config, flags doneFlags) error {
 	fmt.Printf("  Branch:     %s\n", branch)
 	fmt.Printf("  Merge mode: %s\n", mergeMode)
 
+	var prURL string
+
 	switch mergeMode {
 	case "direct":
 		fmt.Println("\nMerging directly to", defaultBranch, "...")
@@ -804,7 +817,8 @@ func cmdDone(cfg *config.Config, flags doneFlags) error {
 
 	case "pr-auto":
 		fmt.Println("\nCreating PR with auto-merge...")
-		prURL, err := merge.CreatePR(cwd, branch, defaultBranch, prTitle)
+		var err error
+		prURL, err = merge.CreatePR(cwd, branch, defaultBranch, prTitle)
 		if err != nil {
 			return fmt.Errorf("creating PR: %w", err)
 		}
@@ -819,7 +833,8 @@ func cmdDone(cfg *config.Config, flags doneFlags) error {
 
 	case "pr-review":
 		fmt.Println("\nCreating PR for review...")
-		prURL, err := merge.CreatePR(cwd, branch, defaultBranch, prTitle)
+		var err error
+		prURL, err = merge.CreatePR(cwd, branch, defaultBranch, prTitle)
 		if err != nil {
 			return fmt.Errorf("creating PR: %w", err)
 		}
@@ -867,6 +882,11 @@ func cmdDone(cfg *config.Config, flags doneFlags) error {
 		fmt.Printf("Warning: %v\n", err)
 	}
 
+	// Log session end event
+	eventLogger := events.NewLogger(cfg)
+	claudeSession := getClaudeSessionID(sess.Worktree)
+	eventLogger.LogSessionEnd(sessionName, sess.Bead, sess.Project, claudeSession, mergeMode, prURL)
+
 	// Remove from state
 	delete(state.Sessions, sessionName)
 	if err := state.Save(); err != nil {
@@ -875,6 +895,18 @@ func cmdDone(cfg *config.Config, flags doneFlags) error {
 
 	fmt.Println("\nDone!")
 	return nil
+}
+
+// getClaudeSessionID attempts to read the Claude session ID from a worktree
+func getClaudeSessionID(worktreePath string) string {
+	// Claude Code stores session info in .claude/session
+	// Try to read it if it exists
+	sessionFile := worktreePath + "/.claude/session"
+	data, err := os.ReadFile(sessionFile)
+	if err != nil {
+		return ""
+	}
+	return string(data)
 }
 
 // cmdStatus shows the status of the current session
@@ -1135,4 +1167,107 @@ func cmdWatch(cfg *config.Config) error {
 
 		time.Sleep(refreshInterval)
 	}
+}
+
+// cmdSeance allows talking to past sessions
+func cmdSeance(cfg *config.Config, args []string) error {
+	eventLogger := events.NewLogger(cfg)
+
+	// No args - list recent sessions
+	if len(args) == 0 {
+		return cmdSeanceList(eventLogger)
+	}
+
+	// Parse flags
+	sessionName := args[0]
+	var prompt string
+	for i := 1; i < len(args); i++ {
+		if args[i] == "-p" && i+1 < len(args) {
+			prompt = args[i+1]
+			break
+		}
+	}
+
+	// Find the session
+	event, err := eventLogger.FindSession(sessionName)
+	if err != nil {
+		return err
+	}
+
+	if event.ClaudeSession == "" {
+		return fmt.Errorf("session '%s' has no Claude session ID recorded", sessionName)
+	}
+
+	if prompt != "" {
+		// One-shot query
+		return cmdSeanceQuery(event, prompt)
+	}
+
+	// Resume session
+	return cmdSeanceResume(event)
+}
+
+func cmdSeanceList(logger *events.Logger) error {
+	sessions, err := logger.RecentSessions(10)
+	if err != nil {
+		return err
+	}
+
+	if len(sessions) == 0 {
+		fmt.Println("No past sessions found.")
+		fmt.Println("\nSessions are recorded when they end via 'wt done' or 'wt close'.")
+		return nil
+	}
+
+	fmt.Println("┌─ Past Sessions (seance) ─────────────────────────────────────────────┐")
+	fmt.Println("│                                                                       │")
+	fmt.Printf("│  %-10s %-18s %-12s %-24s │\n", "Session", "Bead", "Project", "Time")
+	fmt.Printf("│  %-10s %-18s %-12s %-24s │\n", "───────", "────", "───────", "────")
+
+	for _, sess := range sessions {
+		t, _ := time.Parse(time.RFC3339, sess.Time)
+		timeStr := t.Format("2006-01-02 15:04")
+		hasClaude := "  "
+		if sess.ClaudeSession != "" {
+			hasClaude = "💬"
+		}
+		fmt.Printf("│  %s %-8s %-18s %-12s %-24s │\n",
+			hasClaude,
+			truncate(sess.Session, 8),
+			truncate(sess.Bead, 18),
+			truncate(sess.Project, 12),
+			timeStr)
+	}
+
+	fmt.Println("│                                                                       │")
+	fmt.Println("└───────────────────────────────────────────────────────────────────────┘")
+	fmt.Println("\n💬 = Has Claude session (can resume)")
+	fmt.Println("\nCommands:")
+	fmt.Println("  wt seance <name>           Resume conversation")
+	fmt.Println("  wt seance <name> -p 'msg'  One-shot query")
+
+	return nil
+}
+
+func cmdSeanceResume(event *events.Event) error {
+	fmt.Printf("Resuming Claude session for '%s' (bead: %s)...\n", event.Session, event.Bead)
+
+	// Run claude with --resume flag
+	cmd := exec.Command("claude", "--resume", event.ClaudeSession)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	return cmd.Run()
+}
+
+func cmdSeanceQuery(event *events.Event, prompt string) error {
+	fmt.Printf("Querying Claude session for '%s'...\n", event.Session)
+
+	// Run claude with --resume and --print for one-shot
+	cmd := exec.Command("claude", "--resume", event.ClaudeSession, "--print", prompt)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	return cmd.Run()
 }
