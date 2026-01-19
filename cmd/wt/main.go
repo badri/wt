@@ -1911,7 +1911,7 @@ _wt_completions() {
             return 0
             ;;
         hub)
-            COMPREPLY=( $(compgen -W "--status --detach" -- "${cur}") )
+            COMPREPLY=( $(compgen -W "--status --detach --kill --force" -- "${cur}") )
             return 0
             ;;
         config)
@@ -2004,7 +2004,7 @@ _wt() {
                     _describe 'shell' '(bash zsh fish)'
                     ;;
                 hub)
-                    _describe 'flag' '(--status --detach)'
+                    _describe 'flag' '(--status --detach --kill --force)'
                     ;;
                 config)
                     _describe 'subcommand' '(show init set editor)'
@@ -2074,6 +2074,8 @@ complete -c wt -n '__fish_seen_subcommand_from completion' -a 'bash zsh fish' -d
 # Completions for 'hub' - flags
 complete -c wt -n '__fish_seen_subcommand_from hub' -l status -s s -d 'Show hub status'
 complete -c wt -n '__fish_seen_subcommand_from hub' -l detach -s d -d 'Detach from hub'
+complete -c wt -n '__fish_seen_subcommand_from hub' -l kill -s k -d 'Kill hub session'
+complete -c wt -n '__fish_seen_subcommand_from hub' -l force -s f -d 'Skip confirmation'
 
 # Completions for 'config' - subcommands
 complete -c wt -n '__fish_seen_subcommand_from config' -a 'show init set editor' -d 'Config subcommand'
@@ -2104,6 +2106,8 @@ Hub Management:
   hub              Create or attach to hub session
   hub --status     Show hub status without attaching
   hub --detach     Detach from hub, return to previous session
+  hub --kill       Kill hub session (with confirmation)
+  hub --kill -f    Kill hub session (no confirmation)
   handoff          Hand off to fresh Claude instance, preserve context
   prime            Inject startup context (for hooks)
 
@@ -2360,6 +2364,10 @@ func parseHubFlags(args []string) *hub.Options {
 			opts.Detach = true
 		case "-s", "--status":
 			opts.Status = true
+		case "-k", "--kill":
+			opts.Kill = true
+		case "-f", "--force":
+			opts.Force = true
 		}
 	}
 	return opts

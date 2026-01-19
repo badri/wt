@@ -21,6 +21,8 @@ const (
 type Options struct {
 	Detach bool // Detach from hub (return to previous session)
 	Status bool // Show hub status without attaching
+	Kill   bool // Kill the hub session
+	Force  bool // Skip confirmation prompt
 }
 
 // Status contains hub session status information.
@@ -37,6 +39,10 @@ type Status struct {
 func Run(cfg *config.Config, opts *Options) error {
 	if opts.Status {
 		return showStatus()
+	}
+
+	if opts.Kill {
+		return killWithConfirmation(opts.Force)
 	}
 
 	if opts.Detach {
@@ -243,6 +249,53 @@ func Kill() error {
 
 	cmd := exec.Command("tmux", "kill-session", "-t", HubSessionName)
 	return cmd.Run()
+}
+
+// killWithConfirmation kills the hub session after showing implications and prompting.
+func killWithConfirmation(force bool) error {
+	if !Exists() {
+		fmt.Println("Hub session does not exist.")
+		return nil
+	}
+
+	// Check if we're currently in the hub
+	inHub := IsInHub()
+
+	// Show implications
+	fmt.Println("WARNING: Killing the hub session will:")
+	fmt.Println()
+	fmt.Println("  - Terminate any running Claude session in the hub")
+	fmt.Println("  - Lose any unsaved context or conversation history")
+	fmt.Println("  - NOT affect worker sessions (they run independently)")
+	fmt.Println()
+
+	if inHub {
+		fmt.Println("  NOTE: You are currently IN the hub session.")
+		fmt.Println("        Your terminal will be disconnected.")
+		fmt.Println()
+	}
+
+	// If not forced, prompt for confirmation
+	if !force {
+		fmt.Print("Are you sure you want to kill the hub? [y/N] ")
+
+		var response string
+		fmt.Scanln(&response)
+
+		response = strings.ToLower(strings.TrimSpace(response))
+		if response != "y" && response != "yes" {
+			fmt.Println("Cancelled.")
+			return nil
+		}
+	}
+
+	// Kill the hub
+	if err := Kill(); err != nil {
+		return fmt.Errorf("killing hub: %w", err)
+	}
+
+	fmt.Println("Hub session killed.")
+	return nil
 }
 
 // getCurrentSession returns the name of the current tmux session.
