@@ -41,11 +41,50 @@ wt close toast              # Cleanup session + worktree
 
 ## Installation
 
-Coming soon.
+**npm** (recommended for macOS - bypasses Gatekeeper):
+```bash
+npm install -g @worktree/wt
+```
+
+**Go**:
+```bash
+go install github.com/badri/wt/cmd/wt@latest
+```
+
+**From source**:
+```bash
+git clone https://github.com/badri/wt.git
+cd wt
+make install
+```
+
+**macOS Gatekeeper note**: If using `go install` and blocked by Gatekeeper:
+```bash
+xattr -d com.apple.quarantine $(which wt)
+```
+
+## Shell Completions
 
 ```bash
-go install github.com/badri/wt@latest
+# Bash - add to ~/.bashrc
+eval "$(wt completion bash)"
+
+# Zsh - add to ~/.zshrc
+eval "$(wt completion zsh)"
+
+# Fish
+wt completion fish > ~/.config/fish/completions/wt.fish
 ```
+
+## Tmux Keybindings
+
+```bash
+# Add to ~/.tmux.conf
+wt keys >> ~/.tmux.conf
+tmux source-file ~/.tmux.conf
+```
+
+Then use `C-b s` to pick sessions with fzf.
 
 ## Related Projects
 
