@@ -59,7 +59,7 @@ func run() error {
 	switch args[0] {
 	case "new":
 		if len(args) < 2 {
-			return fmt.Errorf("usage: wt new <bead-id> [--repo <path>] [--name <name>] [--no-switch]")
+			return fmt.Errorf("usage: wt new <bead-id> [--repo <path>] [--name <name>] [--no-switch] [--switch]")
 		}
 		return cmdNew(cfg, args[1:])
 	case "kill":
@@ -139,9 +139,10 @@ func run() error {
 }
 
 type newFlags struct {
-	repo     string
-	name     string
-	noSwitch bool
+	repo        string
+	name        string
+	noSwitch    bool
+	forceSwitch bool
 }
 
 func parseNewFlags(args []string) (beadID string, flags newFlags) {
@@ -160,6 +161,8 @@ func parseNewFlags(args []string) (beadID string, flags newFlags) {
 			}
 		case "--no-switch":
 			flags.noSwitch = true
+		case "--switch":
+			flags.forceSwitch = true
 		}
 	}
 	return
@@ -387,8 +390,24 @@ func cmdNew(cfg *config.Config, args []string) error {
 	fmt.Printf("  Worktree: %s\n", worktreePath)
 	fmt.Printf("  Branch:   %s\n", beadID)
 
-	// Switch to session unless --no-switch
-	if !flags.noSwitch {
+	// Send initial work prompt to Claude after a short delay
+	go func() {
+		time.Sleep(2 * time.Second) // Wait for Claude to start
+		prompt := fmt.Sprintf("Work on bead %s: %s", beadID, beadInfo.Title)
+		sendPromptCmd := exec.Command("tmux", "send-keys", "-t", sessionName, prompt, "Enter")
+		sendPromptCmd.Run()
+	}()
+
+	// Determine if we should switch
+	// Default to no-switch if running from hub (WT_HUB=1), unless --switch is used
+	shouldSwitch := !flags.noSwitch
+	if os.Getenv("WT_HUB") == "1" && !flags.forceSwitch {
+		shouldSwitch = false
+		fmt.Println("\n(Running from hub - staying in hub. Use 'wt <name>' or --switch to attach)")
+	}
+
+	// Switch to session unless --no-switch or in hub
+	if shouldSwitch {
 		fmt.Println("\nSwitching...")
 		return tmux.Attach(sessionName)
 	}
@@ -2134,6 +2153,7 @@ Hub Management:
 Session Management:
   list             List active sessions (default when no args)
   new <bead>       Spawn new worker session for a bead
+                   (stays in hub by default, use --switch to attach)
   kill <name>      Kill session, keep bead open
   close <name>     Close session and bead
   done             Complete work and merge (from inside worker)
