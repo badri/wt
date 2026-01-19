@@ -17,17 +17,20 @@ type Config struct {
 }
 
 func Load() (*Config, error) {
-	cfg := &Config{
-		WorktreeRoot:     "~/worktrees",
-		EditorCmd:        "claude",
-		DefaultMergeMode: "pr-review",
-	}
-
 	configDir, err := getConfigDir()
 	if err != nil {
 		return nil, err
 	}
-	cfg.configDir = configDir
+	return LoadFromDir(configDir)
+}
+
+func LoadFromDir(configDir string) (*Config, error) {
+	cfg := &Config{
+		WorktreeRoot:     "~/worktrees",
+		EditorCmd:        "claude",
+		DefaultMergeMode: "pr-review",
+		configDir:        configDir,
+	}
 
 	// Ensure config directory exists
 	if err := os.MkdirAll(configDir, 0755); err != nil {

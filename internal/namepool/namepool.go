@@ -56,3 +56,8 @@ func (p *Pool) Allocate(usedNames []string) (string, error) {
 func (p *Pool) Names() []string {
 	return p.names
 }
+
+// NewPool creates a Pool with the given names (useful for testing)
+func NewPool(names []string) *Pool {
+	return &Pool{names: names}
+}
