@@ -432,6 +432,60 @@ This automatically reports events at the start of each conversation turn:
 
 ---
 
+## Diagnostics
+
+Check your wt setup with `wt doctor`.
+
+### Basic Usage
+
+```bash
+wt doctor                   # Run all diagnostic checks
+```
+
+### Checks Performed
+
+| Check | Description |
+|-------|-------------|
+| **tmux** | Installed, version, server running |
+| **git** | Installed, version |
+| **beads (bd)** | bd command installed, version |
+| **worktree root** | Directory exists and is writable |
+| **config** | Config file valid, no empty required values |
+| **orphaned sessions** | Sessions in state but no tmux session |
+| **orphaned worktrees** | Worktree directories without active sessions |
+| **missing worktrees** | Sessions referencing non-existent worktrees |
+
+### Example Output
+
+```
+┌─ wt doctor ───────────────────────────────────────────────────────────┐
+│                                                                       │
+│  [✓] tmux: tmux 3.5a, server running (3 sessions)                     │
+│  [✓] git: version 2.50.1                                              │
+│  [✓] beads (bd): bd version 0.47.1                                    │
+│  [✓] worktree root: /Users/me/worktrees exists and is writable        │
+│  [✓] config: using defaults (no config.json)                          │
+│  [✓] sessions: 2 active session(s), no orphans                        │
+│                                                                       │
+└───────────────────────────────────────────────────────────────────────┘
+
+All checks passed!
+```
+
+### Status Indicators
+
+- `[✓]` - Check passed
+- `[!]` - Warning (non-critical issue)
+- `[✗]` - Error (must be fixed)
+
+### When to Use
+
+- **Initial setup**: Verify wt is configured correctly
+- **After issues**: Diagnose problems with sessions or worktrees
+- **Cleanup**: Find orphaned sessions/worktrees to clean up
+
+---
+
 ## Common Patterns
 
 ### Pattern 1: Morning Workflow
@@ -530,6 +584,9 @@ Workers inherit `BEADS_DIR` from the project, so bd commands inside workers oper
 
 ## Troubleshooting
 
+**First step for any issue:**
+- Run `wt doctor` to check for common problems
+
 **Session won't spawn:**
 - Check if bead exists: `bd show <bead-id>`
 - Check if already has a session: `wt` (one bead = one session)
@@ -550,7 +607,8 @@ Workers inherit `BEADS_DIR` from the project, so bd commands inside workers oper
 - Ensure docker-compose.yml uses PORT_OFFSET
 
 **Session cleanup issues:**
-- `wt kill <name>` to force-stop
+- Run `wt doctor` to find orphaned sessions/worktrees
+- `wt kill <name>` to force-stop sessions
 - Check for orphaned worktrees: `git worktree list`
 - Check for orphaned tmux: `tmux list-sessions`
 
@@ -583,6 +641,7 @@ Workers inherit `BEADS_DIR` from the project, so bd commands inside workers oper
 | `wt events` | Show recent events |
 | `wt events --tail` | Follow events in real-time |
 | `wt events --new --clear` | Get new events (for hooks) |
+| `wt doctor` | Diagnose setup issues |
 
 ---
 
