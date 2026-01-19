@@ -19,7 +19,7 @@ wt orchestrates isolated development sessions where each bead gets its own:
 
 ```
 HUB SESSION (You are here)
-├── Groom beads: bd create, bd ready
+├── Groom beads: wt create, wt ready, wt beads
 ├── Spawn workers: wt new <bead-id>
 ├── Monitor: wt, wt watch
 └── Switch: wt <session-name>
@@ -143,11 +143,60 @@ Shows: session name, bead, project, worktree path, branch, port offset, status
 ### Checking Ready Beads
 
 ```bash
-wt ready                    # All projects
-wt ready <project>          # Specific project
+wt ready                    # All registered projects (aggregated)
+wt ready <project>          # Specific project only
 ```
 
 Lists beads ready for work (no blockers, not in progress).
+
+**Multi-project aggregation**: When called without a project filter, `wt ready` queries all registered projects and shows a combined view. This is the hub's unified view of available work.
+
+---
+
+## Multi-Project Bead Grooming
+
+The hub can create and query beads across any registered project without changing directories.
+
+### Creating Beads in Any Project
+
+```bash
+wt create <project> <title> [options]
+wt create foo-frontend "Implement login API consumer"
+wt create foo-backend "Add /users endpoint" -p 1 -t feature
+wt create myapp "Fix auth bug" -d "Token refresh fails on timeout" -t bug
+```
+
+**Options:**
+- `-d, --description` - Detailed description
+- `-p, --priority` - Priority (0=critical, 1=high, 2=normal, 3=low)
+- `-t, --type` - Issue type (task, bug, feature, epic, chore)
+
+**What happens:**
+1. Looks up project in registered projects
+2. Creates bead in that project's `.beads/` directory
+3. Bead lives in the project - wt just provides hub access
+
+### Listing Beads for a Project
+
+```bash
+wt beads <project>                    # All beads
+wt beads <project> --status open      # Filter by status
+wt beads foo-frontend --status open
+```
+
+### Cross-Project Workflow Example
+
+```bash
+# Working on backend, realize frontend needs work too
+wt beads foo-backend                  # See backend beads
+wt create foo-frontend "Consume new /users endpoint" -d "Backend endpoint done in foo-backend-xyz"
+
+# Now you can spawn workers for either
+wt new foo-backend-abc --no-switch
+wt new foo-frontend-def --no-switch
+```
+
+**Key insight**: The project's `.beads/` remains source of truth. `wt` is just a multi-project interface that knows where each project lives.
 
 ---
 
@@ -395,7 +444,10 @@ Workers inherit `BEADS_DIR` from the project, so bd commands inside workers oper
 | `wt abandon` | Discard work (in worker) |
 | `wt projects` | List projects |
 | `wt project add` | Register project |
-| `wt ready` | Show ready beads |
+| `wt ready` | Show ready beads (all projects) |
+| `wt ready <project>` | Show ready beads (one project) |
+| `wt create <project> <title>` | Create bead in project |
+| `wt beads <project>` | List beads for project |
 | `wt seance` | List past sessions |
 | `wt seance <name>` | Talk to past session |
 

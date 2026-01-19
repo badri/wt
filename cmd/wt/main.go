@@ -73,6 +73,16 @@ func run() error {
 			projectFilter = args[1]
 		}
 		return cmdReady(cfg, projectFilter)
+	case "create":
+		if len(args) < 3 {
+			return fmt.Errorf("usage: wt create <project> <title> [--description <desc>] [--priority <0-3>] [--type <type>]")
+		}
+		return cmdCreate(cfg, args[1], args[2:])
+	case "beads":
+		if len(args) < 2 {
+			return fmt.Errorf("usage: wt beads <project> [--status <status>]")
+		}
+		return cmdBeads(cfg, args[1], parseBeadsFlags(args[2:]))
 	case "project":
 		if len(args) < 2 {
 			return fmt.Errorf("usage: wt project <add|config|remove> ...")
@@ -544,34 +554,61 @@ func cmdProjects(cfg *config.Config) error {
 }
 
 func cmdReady(cfg *config.Config, projectFilter string) error {
-	beads, err := bead.Ready()
-	if err != nil {
-		return err
-	}
+	mgr := project.NewManager(cfg)
 
-	// Filter by project if specified
+	var allBeads []bead.ReadyBead
+
 	if projectFilter != "" {
-		var filtered []bead.ReadyBead
-		for _, b := range beads {
-			beadProject := bead.ExtractProject(b.ID)
-			if beadProject == projectFilter {
-				filtered = append(filtered, b)
+		// Single project - get beads from that project's .beads dir
+		proj, err := mgr.Get(projectFilter)
+		if err != nil {
+			return fmt.Errorf("project '%s' not found. Register with: wt project add %s <path>", projectFilter, projectFilter)
+		}
+		beadsDir := proj.RepoPath() + "/.beads"
+		beads, err := bead.ReadyInDir(beadsDir)
+		if err != nil {
+			return err
+		}
+		allBeads = beads
+	} else {
+		// No filter - aggregate across all registered projects
+		projects, err := mgr.List()
+		if err != nil {
+			return err
+		}
+
+		if len(projects) == 0 {
+			// Fall back to current directory beads
+			beads, err := bead.Ready()
+			if err != nil {
+				return err
+			}
+			allBeads = beads
+		} else {
+			// Collect beads from all projects
+			for _, proj := range projects {
+				beadsDir := proj.RepoPath() + "/.beads"
+				beads, err := bead.ReadyInDir(beadsDir)
+				if err != nil {
+					// Skip projects without beads
+					continue
+				}
+				allBeads = append(allBeads, beads...)
 			}
 		}
-		beads = filtered
 	}
 
-	if len(beads) == 0 {
+	if len(allBeads) == 0 {
 		if projectFilter != "" {
 			fmt.Printf("No ready beads for project '%s'.\n", projectFilter)
 		} else {
-			fmt.Println("No ready beads.")
+			fmt.Println("No ready beads across all projects.")
 		}
 		fmt.Println("\nAll caught up!")
 		return nil
 	}
 
-	title := "Ready Work"
+	title := "Ready Work (all projects)"
 	if projectFilter != "" {
 		title = fmt.Sprintf("Ready Work (%s)", projectFilter)
 	}
@@ -583,21 +620,21 @@ func cmdReady(cfg *config.Config, projectFilter string) error {
 	}
 	fmt.Println("┐")
 	fmt.Println("│                                                                       │")
-	fmt.Printf("│  %-12s %-40s %-6s %-8s │\n", "Bead", "Title", "Type", "Priority")
-	fmt.Printf("│  %-12s %-40s %-6s %-8s │\n", "────", "─────", "────", "────────")
+	fmt.Printf("│  %-14s %-36s %-6s %-8s │\n", "Bead", "Title", "Type", "Priority")
+	fmt.Printf("│  %-14s %-36s %-6s %-8s │\n", "────", "─────", "────", "────────")
 
-	for _, b := range beads {
+	for _, b := range allBeads {
 		priority := fmt.Sprintf("P%d", b.Priority)
-		fmt.Printf("│  %-12s %-40s %-6s %-8s │\n",
-			truncate(b.ID, 12),
-			truncate(b.Title, 40),
+		fmt.Printf("│  %-14s %-36s %-6s %-8s │\n",
+			truncate(b.ID, 14),
+			truncate(b.Title, 36),
 			truncate(b.IssueType, 6),
 			priority)
 	}
 
 	fmt.Println("│                                                                       │")
 	fmt.Println("└───────────────────────────────────────────────────────────────────────┘")
-	fmt.Printf("\n%d bead(s) ready. Start with: wt new <bead>\n", len(beads))
+	fmt.Printf("\n%d bead(s) ready. Start with: wt new <bead>\n", len(allBeads))
 
 	return nil
 }
@@ -1270,4 +1307,148 @@ func cmdSeanceQuery(event *events.Event, prompt string) error {
 	cmd.Stderr = os.Stderr
 
 	return cmd.Run()
+}
+
+// cmdCreate creates a bead in a specific project
+func cmdCreate(cfg *config.Config, projectName string, args []string) error {
+	mgr := project.NewManager(cfg)
+	proj, err := mgr.Get(projectName)
+	if err != nil {
+		return fmt.Errorf("project '%s' not found. Register with: wt project add %s <path>", projectName, projectName)
+	}
+
+	// Parse title and flags
+	if len(args) == 0 {
+		return fmt.Errorf("title required")
+	}
+
+	title := args[0]
+	opts := parseCreateFlags(args[1:])
+
+	// Get beads directory for project
+	beadsDir := proj.RepoPath() + "/.beads"
+
+	// Create the bead
+	beadID, err := bead.CreateInDir(beadsDir, title, opts)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("Created bead in %s:\n", projectName)
+	fmt.Printf("  ID:    %s\n", beadID)
+	fmt.Printf("  Title: %s\n", title)
+	if opts.Description != "" {
+		fmt.Printf("  Desc:  %s\n", truncate(opts.Description, 50))
+	}
+	if opts.Type != "" {
+		fmt.Printf("  Type:  %s\n", opts.Type)
+	}
+	if opts.Priority >= 0 {
+		fmt.Printf("  Priority: P%d\n", opts.Priority)
+	}
+	fmt.Printf("\nSpawn worker: wt new %s\n", beadID)
+
+	return nil
+}
+
+type createFlags struct {
+	description string
+	priority    int
+	issueType   string
+}
+
+func parseCreateFlags(args []string) *bead.CreateOptions {
+	opts := &bead.CreateOptions{Priority: -1} // -1 means not set
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--description", "-d":
+			if i+1 < len(args) {
+				opts.Description = args[i+1]
+				i++
+			}
+		case "--priority", "-p":
+			if i+1 < len(args) {
+				fmt.Sscanf(args[i+1], "%d", &opts.Priority)
+				i++
+			}
+		case "--type", "-t":
+			if i+1 < len(args) {
+				opts.Type = args[i+1]
+				i++
+			}
+		}
+	}
+	return opts
+}
+
+type beadsFlags struct {
+	status string
+}
+
+func parseBeadsFlags(args []string) beadsFlags {
+	var flags beadsFlags
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--status", "-s":
+			if i+1 < len(args) {
+				flags.status = args[i+1]
+				i++
+			}
+		}
+	}
+	return flags
+}
+
+// cmdBeads lists beads for a specific project
+func cmdBeads(cfg *config.Config, projectName string, flags beadsFlags) error {
+	mgr := project.NewManager(cfg)
+	proj, err := mgr.Get(projectName)
+	if err != nil {
+		return fmt.Errorf("project '%s' not found. Register with: wt project add %s <path>", projectName, projectName)
+	}
+
+	beadsDir := proj.RepoPath() + "/.beads"
+	beads, err := bead.ListInDir(beadsDir, flags.status)
+	if err != nil {
+		return err
+	}
+
+	if len(beads) == 0 {
+		statusMsg := ""
+		if flags.status != "" {
+			statusMsg = fmt.Sprintf(" with status '%s'", flags.status)
+		}
+		fmt.Printf("No beads%s in project '%s'.\n", statusMsg, projectName)
+		return nil
+	}
+
+	title := fmt.Sprintf("Beads (%s)", projectName)
+	if flags.status != "" {
+		title = fmt.Sprintf("Beads (%s, %s)", projectName, flags.status)
+	}
+
+	fmt.Printf("┌─ %s ", title)
+	padding := 71 - len(title) - 4
+	for i := 0; i < padding; i++ {
+		fmt.Print("─")
+	}
+	fmt.Println("┐")
+	fmt.Println("│                                                                       │")
+	fmt.Printf("│  %-14s %-38s %-6s %-8s │\n", "Bead", "Title", "Type", "Priority")
+	fmt.Printf("│  %-14s %-38s %-6s %-8s │\n", "────", "─────", "────", "────────")
+
+	for _, b := range beads {
+		priority := fmt.Sprintf("P%d", b.Priority)
+		fmt.Printf("│  %-14s %-38s %-6s %-8s │\n",
+			truncate(b.ID, 14),
+			truncate(b.Title, 38),
+			truncate(b.IssueType, 6),
+			priority)
+	}
+
+	fmt.Println("│                                                                       │")
+	fmt.Println("└───────────────────────────────────────────────────────────────────────┘")
+	fmt.Printf("\n%d bead(s) found.\n", len(beads))
+
+	return nil
 }

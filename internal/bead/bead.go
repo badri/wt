@@ -125,3 +125,84 @@ func Ready() ([]ReadyBead, error) {
 
 	return beads, nil
 }
+
+// ReadyInDir returns ready beads from a specific beads directory
+func ReadyInDir(beadsDir string) ([]ReadyBead, error) {
+	cmd := exec.Command("bd", "--db", beadsDir, "ready", "--json")
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("getting ready beads from %s: %w", beadsDir, err)
+	}
+
+	var beads []ReadyBead
+	if err := json.Unmarshal(output, &beads); err != nil {
+		return nil, fmt.Errorf("parsing ready beads: %w", err)
+	}
+
+	return beads, nil
+}
+
+// CreateInDir creates a bead in a specific beads directory
+func CreateInDir(beadsDir, title string, opts *CreateOptions) (string, error) {
+	args := []string{"--db", beadsDir, "create", title}
+
+	if opts != nil {
+		if opts.Description != "" {
+			args = append(args, "-d", opts.Description)
+		}
+		if opts.Priority >= 0 {
+			args = append(args, "-p", fmt.Sprintf("%d", opts.Priority))
+		}
+		if opts.Type != "" {
+			args = append(args, "-t", opts.Type)
+		}
+	}
+
+	cmd := exec.Command("bd", args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("creating bead: %s: %w", string(output), err)
+	}
+
+	// Parse the created bead ID from output
+	// Output format: "✓ Created issue: wt-xyz"
+	lines := strings.Split(string(output), "\n")
+	for _, line := range lines {
+		if strings.Contains(line, "Created issue:") {
+			parts := strings.Split(line, ":")
+			if len(parts) >= 2 {
+				return strings.TrimSpace(parts[len(parts)-1]), nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("could not parse created bead ID from: %s", string(output))
+}
+
+// CreateOptions holds options for creating a bead
+type CreateOptions struct {
+	Description string
+	Priority    int
+	Type        string
+}
+
+// ListInDir returns all beads from a specific beads directory
+func ListInDir(beadsDir string, status string) ([]ReadyBead, error) {
+	args := []string{"--db", beadsDir, "list", "--json"}
+	if status != "" {
+		args = append(args, "--status", status)
+	}
+
+	cmd := exec.Command("bd", args...)
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("listing beads from %s: %w", beadsDir, err)
+	}
+
+	var beads []ReadyBead
+	if err := json.Unmarshal(output, &beads); err != nil {
+		return nil, fmt.Errorf("parsing beads list: %w", err)
+	}
+
+	return beads, nil
+}

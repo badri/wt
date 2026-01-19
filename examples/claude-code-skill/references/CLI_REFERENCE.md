@@ -281,7 +281,7 @@ wt watch [flags]
 
 ### wt ready
 
-Show beads ready for work.
+Show beads ready for work across projects.
 
 ```bash
 wt ready [project]
@@ -290,10 +290,78 @@ wt ready [project]
 **Arguments:**
 - `[project]` - Optional project name to filter
 
+**Behavior:**
+- Without project: Aggregates ready beads from ALL registered projects
+- With project: Shows ready beads only from that project's `.beads/`
+
 **Shows beads that:**
 - Status is `open` (not in_progress or closed)
 - Have no blocking dependencies
 - Don't already have a worker session
+
+**Examples:**
+```bash
+wt ready                    # All projects combined
+wt ready foo-backend        # Just foo-backend beads
+```
+
+---
+
+### wt create
+
+Create a bead in a specific project from the hub.
+
+```bash
+wt create <project> <title> [flags]
+```
+
+**Arguments:**
+- `<project>` - Registered project name
+- `<title>` - Bead title
+
+**Flags:**
+| Flag | Description |
+|------|-------------|
+| `-d, --description` | Detailed description |
+| `-p, --priority` | Priority (0=critical, 1=high, 2=normal, 3=low) |
+| `-t, --type` | Issue type (task, bug, feature, epic, chore) |
+
+**What happens:**
+1. Looks up project in registered projects
+2. Creates bead in `<project-repo>/.beads/`
+3. Project's `.beads/` remains source of truth
+
+**Examples:**
+```bash
+wt create foo-frontend "Implement login form"
+wt create foo-backend "Add /users endpoint" -p 1 -t feature
+wt create myapp "Fix auth bug" -d "Token refresh fails" -t bug
+```
+
+---
+
+### wt beads
+
+List beads for a specific project.
+
+```bash
+wt beads <project> [flags]
+```
+
+**Arguments:**
+- `<project>` - Registered project name
+
+**Flags:**
+| Flag | Description |
+|------|-------------|
+| `-s, --status` | Filter by status (open, in_progress, closed) |
+
+**Examples:**
+```bash
+wt beads foo-frontend                    # All beads
+wt beads foo-frontend --status open      # Only open beads
+wt beads foo-backend -s in_progress      # In-progress beads
+```
 
 ---
 
