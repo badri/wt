@@ -19,10 +19,11 @@ const (
 
 // Options configures hub behavior.
 type Options struct {
-	Detach bool // Detach from hub (return to previous session)
-	Status bool // Show hub status without attaching
-	Kill   bool // Kill the hub session
-	Force  bool // Skip confirmation prompt
+	Detach  bool // Detach from hub (return to previous session)
+	Status  bool // Show hub status without attaching
+	Kill    bool // Kill the hub session
+	Force   bool // Skip confirmation prompt
+	NoWatch bool // Don't start wt watch pane
 }
 
 // Status contains hub session status information.
@@ -50,7 +51,7 @@ func Run(cfg *config.Config, opts *Options) error {
 	}
 
 	// Default: create or attach to hub
-	return createOrAttach(cfg)
+	return createOrAttach(cfg, opts)
 }
 
 // showStatus displays hub status without attaching.
@@ -126,18 +127,18 @@ func GetStatus() Status {
 }
 
 // createOrAttach creates a new hub session or attaches to existing one.
-func createOrAttach(cfg *config.Config) error {
+func createOrAttach(cfg *config.Config, opts *Options) error {
 	if Exists() {
 		// Hub exists - attach to it
 		return attach()
 	}
 
 	// Create new hub session
-	return create(cfg)
+	return create(cfg, opts)
 }
 
 // create creates a new hub tmux session.
-func create(cfg *config.Config) error {
+func create(cfg *config.Config, opts *Options) error {
 	// Use home directory as working directory
 	homeDir := os.Getenv("HOME")
 	if homeDir == "" {
@@ -169,25 +170,28 @@ func create(cfg *config.Config) error {
 		}
 	}
 
-	// Create a right-side pane for wt watch
-	// Split horizontally with 25% for the watch pane
-	splitCmd := exec.Command("tmux", "split-window", "-h", "-t", HubSessionName, "-l", "25%", "-c", homeDir)
-	if err := splitCmd.Run(); err != nil {
-		// Non-fatal - watch pane is optional
-		fmt.Fprintf(os.Stderr, "Warning: could not create watch pane: %v\n", err)
-	} else {
-		// Start wt watch in the new pane
-		watchCmd := exec.Command("tmux", "send-keys", "-t", HubSessionName+".1", "wt watch", "Enter")
-		_ = watchCmd.Run() // Non-fatal if this fails
+	// Create a right-side pane for wt watch (unless --no-watch)
+	if !opts.NoWatch {
+		splitCmd := exec.Command("tmux", "split-window", "-h", "-t", HubSessionName, "-l", "25%", "-c", homeDir)
+		if err := splitCmd.Run(); err != nil {
+			// Non-fatal - watch pane is optional
+			fmt.Fprintf(os.Stderr, "Warning: could not create watch pane: %v\n", err)
+		} else {
+			// Start wt watch in the new pane
+			watchCmd := exec.Command("tmux", "send-keys", "-t", HubSessionName+".1", "wt watch", "Enter")
+			_ = watchCmd.Run() // Non-fatal if this fails
 
-		// Focus back on the main pane (pane 0)
-		focusCmd := exec.Command("tmux", "select-pane", "-t", HubSessionName+".0")
-		_ = focusCmd.Run()
+			// Focus back on the main pane (pane 0)
+			focusCmd := exec.Command("tmux", "select-pane", "-t", HubSessionName+".0")
+			_ = focusCmd.Run()
+		}
 	}
 
 	fmt.Printf("Created hub session.\n")
 	fmt.Printf("  Working directory: %s\n", homeDir)
-	fmt.Printf("  Watch dashboard: right pane\n")
+	if !opts.NoWatch {
+		fmt.Printf("  Watch dashboard: right pane\n")
+	}
 
 	// Attach to the new session
 	return attach()

@@ -2114,7 +2114,7 @@ _wt_completions() {
             return 0
             ;;
         hub)
-            COMPREPLY=( $(compgen -W "--status --detach --kill --force" -- "${cur}") )
+            COMPREPLY=( $(compgen -W "--status --detach --kill --force --no-watch" -- "${cur}") )
             return 0
             ;;
         config)
@@ -2207,7 +2207,7 @@ _wt() {
                     _describe 'shell' '(bash zsh fish)'
                     ;;
                 hub)
-                    _describe 'flag' '(--status --detach --kill --force)'
+                    _describe 'flag' '(--status --detach --kill --force --no-watch)'
                     ;;
                 config)
                     _describe 'subcommand' '(show init set editor)'
@@ -2279,6 +2279,7 @@ complete -c wt -n '__fish_seen_subcommand_from hub' -l status -s s -d 'Show hub 
 complete -c wt -n '__fish_seen_subcommand_from hub' -l detach -s d -d 'Detach from hub'
 complete -c wt -n '__fish_seen_subcommand_from hub' -l kill -s k -d 'Kill hub session'
 complete -c wt -n '__fish_seen_subcommand_from hub' -l force -s f -d 'Skip confirmation'
+complete -c wt -n '__fish_seen_subcommand_from hub' -l no-watch -d 'Skip watch pane'
 
 # Completions for 'config' - subcommands
 complete -c wt -n '__fish_seen_subcommand_from config' -a 'show init set editor' -d 'Config subcommand'
@@ -2574,6 +2575,8 @@ func parseHubFlags(args []string) *hub.Options {
 			opts.Kill = true
 		case "-f", "--force":
 			opts.Force = true
+		case "--no-watch":
+			opts.NoWatch = true
 		}
 	}
 	return opts
