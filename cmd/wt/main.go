@@ -122,6 +122,8 @@ func run() error {
 		return cmdCompletion(args[1])
 	case "version", "--version", "-v":
 		return cmdVersion()
+	case "help", "--help", "-h":
+		return cmdHelp()
 	case "handoff":
 		return cmdHandoff(cfg, args[1:])
 	case "prime":
@@ -1865,7 +1867,7 @@ _wt_completions() {
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
 
-    commands="list new kill close done status abandon watch seance projects ready create beads project auto events doctor pick keys completion handoff prime hub"
+    commands="list new kill close done status abandon watch seance projects ready create beads project auto events doctor pick keys completion handoff prime hub help"
 
     case "${prev}" in
         wt)
@@ -1951,6 +1953,7 @@ _wt() {
         'handoff:Handoff to fresh Claude instance'
         'prime:Inject startup context'
         'hub:Create or attach to hub session'
+        'help:Show help message'
     )
 
     _arguments -C \
@@ -2034,6 +2037,7 @@ complete -c wt -n __fish_use_subcommand -a completion -d 'Generate shell complet
 complete -c wt -n __fish_use_subcommand -a handoff -d 'Handoff to fresh Claude instance'
 complete -c wt -n __fish_use_subcommand -a prime -d 'Inject startup context'
 complete -c wt -n __fish_use_subcommand -a hub -d 'Create or attach to hub session'
+complete -c wt -n __fish_use_subcommand -a help -d 'Show help message'
 
 # Session names for bare wt command
 complete -c wt -n __fish_use_subcommand -a "(wt list 2>/dev/null | grep -E '^\│\s+[🟢🟡🔴]' | awk '{print \$2}')" -d 'Switch to session'
@@ -2068,6 +2072,75 @@ func cmdVersion() error {
 	fmt.Printf("  built:   %s\n", date)
 	fmt.Printf("  go:      %s\n", runtime.Version())
 	fmt.Printf("  os/arch: %s/%s\n", runtime.GOOS, runtime.GOARCH)
+	return nil
+}
+
+// cmdHelp prints categorized help information
+func cmdHelp() error {
+	help := `wt - Worktree Session Manager
+
+Orchestrates isolated development sessions where each bead gets its own
+git worktree, tmux session, and optional test environment.
+
+Usage:
+  wt [command]
+  wt <session>     Switch to a session by name or bead ID
+
+Hub Management:
+  hub              Create or attach to hub session
+  hub --status     Show hub status without attaching
+  hub --detach     Detach from hub, return to previous session
+  handoff          Hand off to fresh Claude instance, preserve context
+  prime            Inject startup context (for hooks)
+
+Session Management:
+  list             List active sessions (default when no args)
+  new <bead>       Spawn new worker session for a bead
+  kill <name>      Kill session, keep bead open
+  close <name>     Close session and bead
+  done             Complete work and merge (from inside worker)
+  status           Show current session status (from inside worker)
+  abandon          Discard work, keep bead open (from inside worker)
+  pick             Interactive session picker (uses fzf if available)
+
+Monitoring:
+  watch            Live dashboard of all sessions
+  events           Show recent events
+  events --tail    Follow events in real-time
+  seance           List past sessions
+  seance <name>    Talk to a past session
+
+Project Management:
+  projects         List registered projects
+  project add      Register a new project
+  project config   Edit project configuration
+  project remove   Remove a project registration
+
+Bead Operations:
+  ready            Show ready beads across all projects
+  ready <project>  Show ready beads for a specific project
+  create           Create a new bead in a project
+  beads <project>  List beads for a project
+
+Automation:
+  auto             Process ready beads autonomously
+  auto --dry-run   Preview what would run
+  auto --stop      Stop running auto gracefully
+
+Diagnostics:
+  doctor           Run health checks on wt setup
+  keys             Output tmux keybindings for .tmux.conf
+  completion       Generate shell completions (bash/zsh/fish)
+  version          Print version information
+  help             Show this help message
+
+Flags:
+  -h, --help       Show help
+  -v, --version    Show version
+
+Use "wt <command> --help" for more information about a command.
+`
+	fmt.Print(help)
 	return nil
 }
 
