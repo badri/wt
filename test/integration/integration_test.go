@@ -8,9 +8,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/badri/wt/internal/config"
 	"github.com/badri/wt/internal/events"
+	"github.com/badri/wt/internal/handoff"
 	"github.com/badri/wt/internal/merge"
 	"github.com/badri/wt/internal/namepool"
 	"github.com/badri/wt/internal/project"
@@ -953,4 +955,304 @@ func TestIntegration_WorktreeBranchOperations(t *testing.T) {
 	}
 
 	t.Log("Worktree branch operations integration test completed successfully")
+}
+
+// TestIntegration_HandoffMarker tests the handoff marker file operations.
+func TestIntegration_HandoffMarker(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "config")
+
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	configJSON := `{"worktree_root": "` + filepath.Join(tmpDir, "worktrees") + `"}`
+	if err := os.WriteFile(filepath.Join(configDir, "config.json"), []byte(configJSON), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := config.LoadFromDir(configDir)
+	if err != nil {
+		t.Fatalf("failed to load config: %v", err)
+	}
+
+	// Initially no marker
+	exists, _, _, err := handoff.CheckMarker(cfg)
+	if err != nil {
+		t.Fatalf("CheckMarker failed: %v", err)
+	}
+	if exists {
+		t.Error("expected no marker initially")
+	}
+
+	// Create marker manually (simulating writeMarker)
+	runtimeDir := filepath.Join(cfg.ConfigDir(), handoff.RuntimeDir)
+	if err := os.MkdirAll(runtimeDir, 0755); err != nil {
+		t.Fatalf("failed to create runtime dir: %v", err)
+	}
+
+	markerPath := filepath.Join(runtimeDir, handoff.HandoffMarkerFile)
+	timestamp := time.Now().Format(time.RFC3339)
+	sessionName := "integration-test-session"
+	content := timestamp + "\n" + sessionName + "\n"
+	if err := os.WriteFile(markerPath, []byte(content), 0644); err != nil {
+		t.Fatalf("failed to write marker: %v", err)
+	}
+
+	// Check marker exists
+	exists, prevSession, handoffTime, err := handoff.CheckMarker(cfg)
+	if err != nil {
+		t.Fatalf("CheckMarker failed: %v", err)
+	}
+	if !exists {
+		t.Error("expected marker to exist")
+	}
+	if prevSession != sessionName {
+		t.Errorf("expected prevSession %s, got %s", sessionName, prevSession)
+	}
+	if handoffTime.IsZero() {
+		t.Error("expected non-zero handoff time")
+	}
+
+	// Clear marker
+	if err := handoff.ClearMarker(cfg); err != nil {
+		t.Fatalf("ClearMarker failed: %v", err)
+	}
+
+	// Verify cleared
+	exists, _, _, err = handoff.CheckMarker(cfg)
+	if err != nil {
+		t.Fatalf("CheckMarker after clear failed: %v", err)
+	}
+	if exists {
+		t.Error("expected marker to be cleared")
+	}
+
+	t.Log("Handoff marker integration test completed successfully")
+}
+
+// TestIntegration_PrimeWorkflow tests the prime command workflow.
+func TestIntegration_PrimeWorkflow(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "config")
+
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	configJSON := `{"worktree_root": "` + filepath.Join(tmpDir, "worktrees") + `"}`
+	if err := os.WriteFile(filepath.Join(configDir, "config.json"), []byte(configJSON), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := config.LoadFromDir(configDir)
+	if err != nil {
+		t.Fatalf("failed to load config: %v", err)
+	}
+
+	// Test prime without marker (normal startup)
+	opts := &handoff.PrimeOptions{
+		Quiet:     true,
+		NoBdPrime: true, // Skip bd prime to avoid external dependency
+	}
+
+	result, err := handoff.Prime(cfg, opts)
+	if err != nil {
+		t.Fatalf("Prime failed: %v", err)
+	}
+	if result.IsPostHandoff {
+		t.Error("expected IsPostHandoff to be false without marker")
+	}
+
+	// Create marker to simulate post-handoff
+	runtimeDir := filepath.Join(cfg.ConfigDir(), handoff.RuntimeDir)
+	if err := os.MkdirAll(runtimeDir, 0755); err != nil {
+		t.Fatalf("failed to create runtime dir: %v", err)
+	}
+
+	markerPath := filepath.Join(runtimeDir, handoff.HandoffMarkerFile)
+	timestamp := time.Now().Format(time.RFC3339)
+	content := timestamp + "\nprev-session\n"
+	if err := os.WriteFile(markerPath, []byte(content), 0644); err != nil {
+		t.Fatalf("failed to write marker: %v", err)
+	}
+
+	// Test prime with marker (post-handoff startup)
+	result2, err := handoff.Prime(cfg, opts)
+	if err != nil {
+		t.Fatalf("Prime with marker failed: %v", err)
+	}
+	if !result2.IsPostHandoff {
+		t.Error("expected IsPostHandoff to be true with marker")
+	}
+	if result2.PrevSession != "prev-session" {
+		t.Errorf("expected PrevSession 'prev-session', got %s", result2.PrevSession)
+	}
+
+	// Marker should be cleared after prime
+	exists, _, _, _ := handoff.CheckMarker(cfg)
+	if exists {
+		t.Error("expected marker to be cleared after Prime")
+	}
+
+	t.Log("Prime workflow integration test completed successfully")
+}
+
+// TestIntegration_HandoffContextCollection tests context collection for handoff.
+func TestIntegration_HandoffContextCollection(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "config")
+
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	configJSON := `{"worktree_root": "` + filepath.Join(tmpDir, "worktrees") + `"}`
+	if err := os.WriteFile(filepath.Join(configDir, "config.json"), []byte(configJSON), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "sessions.json"), []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := config.LoadFromDir(configDir)
+	if err != nil {
+		t.Fatalf("failed to load config: %v", err)
+	}
+
+	// Create some session state
+	state, err := session.LoadState(cfg)
+	if err != nil {
+		t.Fatalf("failed to load state: %v", err)
+	}
+
+	state.Sessions["alpha"] = &session.Session{
+		Bead:    "test-bead-1",
+		Project: "testproj",
+		Status:  "working",
+	}
+	state.Sessions["beta"] = &session.Session{
+		Bead:    "test-bead-2",
+		Project: "testproj",
+		Status:  "idle",
+	}
+	if err := state.Save(); err != nil {
+		t.Fatalf("failed to save state: %v", err)
+	}
+
+	// Test GenerateSummary
+	summary, err := handoff.GenerateSummary(cfg)
+	if err != nil {
+		t.Fatalf("GenerateSummary failed: %v", err)
+	}
+
+	// Summary should contain session info
+	if !strings.Contains(summary, "Active Sessions") {
+		t.Error("expected summary to contain 'Active Sessions'")
+	}
+	if !strings.Contains(summary, "alpha") {
+		t.Error("expected summary to contain session 'alpha'")
+	}
+	if !strings.Contains(summary, "beta") {
+		t.Error("expected summary to contain session 'beta'")
+	}
+	if !strings.Contains(summary, "test-bead-1") {
+		t.Error("expected summary to contain 'test-bead-1'")
+	}
+
+	t.Log("Handoff context collection integration test completed successfully")
+}
+
+// TestIntegration_HandoffDryRun tests the handoff dry-run functionality.
+func TestIntegration_HandoffDryRun(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "config")
+
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	configJSON := `{"worktree_root": "` + filepath.Join(tmpDir, "worktrees") + `"}`
+	if err := os.WriteFile(filepath.Join(configDir, "config.json"), []byte(configJSON), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "sessions.json"), []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := config.LoadFromDir(configDir)
+	if err != nil {
+		t.Fatalf("failed to load config: %v", err)
+	}
+
+	opts := &handoff.Options{
+		Message:     "Test handoff message",
+		AutoCollect: false,
+		DryRun:      true,
+	}
+
+	// Dry run should not create marker or modify anything
+	result, err := handoff.Run(cfg, opts)
+	if err != nil {
+		t.Fatalf("Handoff dry run failed: %v", err)
+	}
+
+	// Result message should contain our custom message
+	if !strings.Contains(result.Message, "Test handoff message") {
+		t.Error("expected result to contain our message")
+	}
+
+	// Marker should NOT be created (dry run)
+	exists, _, _, _ := handoff.CheckMarker(cfg)
+	if exists {
+		t.Error("expected no marker after dry run")
+	}
+
+	t.Log("Handoff dry run integration test completed successfully")
+}
+
+// TestIntegration_QuickPrime tests the QuickPrime function.
+func TestIntegration_QuickPrime(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "config")
+
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	configJSON := `{"worktree_root": "` + filepath.Join(tmpDir, "worktrees") + `"}`
+	if err := os.WriteFile(filepath.Join(configDir, "config.json"), []byte(configJSON), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := config.LoadFromDir(configDir)
+	if err != nil {
+		t.Fatalf("failed to load config: %v", err)
+	}
+
+	// Test QuickPrime without marker
+	if err := handoff.QuickPrime(cfg); err != nil {
+		t.Fatalf("QuickPrime without marker failed: %v", err)
+	}
+
+	// Create marker
+	runtimeDir := filepath.Join(cfg.ConfigDir(), handoff.RuntimeDir)
+	if err := os.MkdirAll(runtimeDir, 0755); err != nil {
+		t.Fatalf("failed to create runtime dir: %v", err)
+	}
+
+	markerPath := filepath.Join(runtimeDir, handoff.HandoffMarkerFile)
+	timestamp := time.Now().Format(time.RFC3339)
+	content := timestamp + "\nquick-test-session\n"
+	if err := os.WriteFile(markerPath, []byte(content), 0644); err != nil {
+		t.Fatalf("failed to write marker: %v", err)
+	}
+
+	// Test QuickPrime with marker
+	if err := handoff.QuickPrime(cfg); err != nil {
+		t.Fatalf("QuickPrime with marker failed: %v", err)
+	}
+
+	// Marker should be cleared
+	exists, _, _, _ := handoff.CheckMarker(cfg)
+	if exists {
+		t.Error("expected marker to be cleared after QuickPrime")
+	}
+
+	t.Log("QuickPrime integration test completed successfully")
 }
