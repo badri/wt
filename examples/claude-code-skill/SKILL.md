@@ -633,8 +633,9 @@ Workers inherit `BEADS_DIR` from the project, so bd commands inside workers oper
 | `wt ready <project>` | Show ready beads (one project) |
 | `wt create <project> <title>` | Create bead in project |
 | `wt beads <project>` | List beads for project |
-| `wt seance` | List past sessions |
+| `wt seance` | List past sessions (workers + hub) |
 | `wt seance <name>` | Talk to past session |
+| `wt seance hub` | Resume last hub session |
 | `wt auto` | Process ready beads autonomously |
 | `wt auto --dry-run` | Preview auto run |
 | `wt auto --stop` | Stop running auto gracefully |
@@ -645,7 +646,9 @@ Workers inherit `BEADS_DIR` from the project, so bd commands inside workers oper
 | `wt hub` | Create or attach to hub session |
 | `wt hub --status` | Show hub status without attaching |
 | `wt hub --detach` | Detach from hub (return to previous) |
+| `wt hub --kill` | Kill hub session (with confirmation) |
 | `wt handoff` | Handoff hub to fresh Claude instance |
+| `wt config` | Show/manage wt configuration |
 | `wt prime` | Inject startup context (for hooks) |
 
 ---
@@ -660,6 +663,8 @@ The hub is a dedicated tmux session for orchestrating worker sessions. Unlike wo
 wt hub                      # Create hub or attach if exists
 wt hub --status             # Show hub status without attaching
 wt hub --detach             # Detach from hub, return to previous session
+wt hub --kill               # Kill hub session (prompts for confirmation)
+wt hub --kill --force       # Kill hub without confirmation
 ```
 
 ### Hub Characteristics
@@ -706,6 +711,26 @@ wt hub --detach       # Returns to previous session
 | BEADS_DIR | Not set | Set to project's .beads |
 | Purpose | Orchestration | Actual coding work |
 
+### Hub Sessions in Seance
+
+Hub sessions appear in `wt seance` after a handoff, allowing you to resume previous hub conversations:
+
+```bash
+wt seance                   # Lists both worker (💬) and hub (🏠) sessions
+wt seance hub               # Resume the last hub session
+```
+
+**Example output:**
+```
+┌─ Past Sessions (seance) ─────────────────────────────────────────────┐
+│  Session    Bead               Project      Time                     │
+│  🏠 hub      (hub)              (orchestrat  2026-01-19 18:30         │
+│  💬 toast    wt-8g0             wt           2026-01-19 17:45         │
+└───────────────────────────────────────────────────────────────────────┘
+
+💬 = Worker session   🏠 = Hub session
+```
+
 ---
 
 ## Hub Persistence: Handoff and Prime
@@ -731,9 +756,10 @@ wt handoff --dry-run        # Preview what would be collected
 **What happens:**
 1. Collects context (active sessions, ready beads, in-progress work)
 2. Stores in "Hub Handoff" bead (persists in beads)
-3. Writes handoff marker file
-4. Clears tmux history
-5. Respawns fresh Claude via `tmux respawn-pane`
+3. Logs hub session for seance (can resume via `wt seance hub`)
+4. Writes handoff marker file
+5. Clears tmux history
+6. Respawns fresh Claude via `tmux respawn-pane`
 
 ### Startup: wt prime
 
