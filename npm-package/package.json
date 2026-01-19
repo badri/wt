@@ -1,0 +1,43 @@
+{
+  "name": "@worktree/wt",
+  "version": "0.1.0",
+  "description": "Worktree session manager for bead-driven development with Claude",
+  "bin": {
+    "wt": "bin/wt.js"
+  },
+  "scripts": {
+    "postinstall": "node scripts/postinstall.js",
+    "test": "node scripts/test.js"
+  },
+  "keywords": [
+    "worktree",
+    "git",
+    "tmux",
+    "claude",
+    "beads",
+    "session",
+    "workflow"
+  ],
+  "author": "Lakshmi Narasimhan",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/badri/wt.git"
+  },
+  "bugs": {
+    "url": "https://github.com/badri/wt/issues"
+  },
+  "homepage": "https://github.com/badri/wt#readme",
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ]
+}
