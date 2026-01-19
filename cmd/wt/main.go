@@ -1032,6 +1032,8 @@ func cmdWatch(cfg *config.Config) error {
 
 	// Track previous states for notifications
 	prevStates := make(map[string]string)
+	prevPRStates := make(map[string]string)
+	prevSessions := make(map[string]bool)
 
 	for {
 		// Clear screen
@@ -1040,6 +1042,17 @@ func cmdWatch(cfg *config.Config) error {
 		state, err := session.LoadState(cfg)
 		if err != nil {
 			return err
+		}
+
+		// Check for ended sessions (were in prev, not in current)
+		currentSessions := make(map[string]bool)
+		for name := range state.Sessions {
+			currentSessions[name] = true
+		}
+		for name := range prevSessions {
+			if !currentSessions[name] {
+				monitor.Notify("wt: Session Ended", fmt.Sprintf("Session '%s' has completed", name))
+			}
 		}
 
 		now := time.Now().Format("15:04:05")
@@ -1103,8 +1116,18 @@ func cmdWatch(cfg *config.Config) error {
 					}
 				}
 				prevStates[name] = status
+
+				// Send notification on PR merge
+				prevPR := prevPRStates[name]
+				if prevPR != "" && prevPR != "merged" && prStatus == "merged" {
+					monitor.Notify("wt: PR Merged", fmt.Sprintf("PR for '%s' has been merged", name))
+				}
+				prevPRStates[name] = prStatus
 			}
 		}
+
+		// Update previous sessions for next iteration
+		prevSessions = currentSessions
 
 		fmt.Println("│                                                                       │")
 		fmt.Println("└───────────────────────────────────────────────────────────────────────┘")
