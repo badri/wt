@@ -19,6 +19,7 @@ const (
 	EventSessionStart EventType = "session_start"
 	EventSessionEnd   EventType = "session_end"
 	EventSessionKill  EventType = "session_kill"
+	EventHubHandoff   EventType = "hub_handoff"
 	EventPRCreated    EventType = "pr_created"
 	EventPRMerged     EventType = "pr_merged"
 )
@@ -106,6 +107,18 @@ func (l *Logger) LogSessionKill(session, bead, project string) error {
 	})
 }
 
+// LogHubHandoff logs a hub handoff event (hub session can be resumed via seance)
+func (l *Logger) LogHubHandoff(claudeSession, message string) error {
+	return l.Log(&Event{
+		Type:          EventHubHandoff,
+		Session:       "hub",
+		Bead:          "",
+		Project:       "",
+		ClaudeSession: claudeSession,
+		MergeMode:     message, // Reuse field for handoff message
+	})
+}
+
 // Recent returns the most recent N events
 func (l *Logger) Recent(n int) ([]Event, error) {
 	data, err := os.ReadFile(l.eventsFile)
@@ -135,7 +148,7 @@ func (l *Logger) Recent(n int) ([]Event, error) {
 	return allEvents[len(allEvents)-n:], nil
 }
 
-// RecentSessions returns recent session_end events (sessions that can be resumed)
+// RecentSessions returns recent session_end and hub_handoff events (sessions that can be resumed)
 func (l *Logger) RecentSessions(n int) ([]Event, error) {
 	events, err := l.Recent(1000) // Read more to filter
 	if err != nil {
@@ -144,8 +157,10 @@ func (l *Logger) RecentSessions(n int) ([]Event, error) {
 
 	var sessions []Event
 	for i := len(events) - 1; i >= 0 && len(sessions) < n; i-- {
-		if events[i].Type == EventSessionEnd && events[i].ClaudeSession != "" {
-			sessions = append(sessions, events[i])
+		e := events[i]
+		// Include session_end with Claude session, or hub_handoff events
+		if (e.Type == EventSessionEnd || e.Type == EventHubHandoff) && e.ClaudeSession != "" {
+			sessions = append(sessions, e)
 		}
 	}
 
@@ -160,15 +175,16 @@ func (l *Logger) FindSession(query string) (*Event, error) {
 		return nil, err
 	}
 
-	// Filter to session_end events with Claude session (can be resumed)
+	// Filter to session_end or hub_handoff events with Claude session (can be resumed)
 	var sessions []Event
 	for i := len(events) - 1; i >= 0; i-- {
-		if events[i].Type == EventSessionEnd && events[i].ClaudeSession != "" {
-			sessions = append(sessions, events[i])
+		e := events[i]
+		if (e.Type == EventSessionEnd || e.Type == EventHubHandoff) && e.ClaudeSession != "" {
+			sessions = append(sessions, e)
 		}
 	}
 
-	// 1. Exact session name match
+	// 1. Exact session name match (including "hub")
 	for _, e := range sessions {
 		if e.Session == query {
 			return &e, nil
@@ -177,14 +193,14 @@ func (l *Logger) FindSession(query string) (*Event, error) {
 
 	// 2. Bead ID match (exact or prefix)
 	for _, e := range sessions {
-		if e.Bead == query || strings.HasPrefix(e.Bead, query) {
+		if e.Bead != "" && (e.Bead == query || strings.HasPrefix(e.Bead, query)) {
 			return &e, nil
 		}
 	}
 
 	// 3. Project match
 	for _, e := range sessions {
-		if e.Project == query {
+		if e.Project != "" && e.Project == query {
 			return &e, nil
 		}
 	}

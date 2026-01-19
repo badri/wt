@@ -1316,7 +1316,7 @@ func cmdSeanceList(logger *events.Logger) error {
 
 	if len(sessions) == 0 {
 		fmt.Println("No past sessions found.")
-		fmt.Println("\nSessions are recorded when they end via 'wt done' or 'wt close'.")
+		fmt.Println("\nSessions are recorded when they end via 'wt done', 'wt close', or 'wt handoff'.")
 		return nil
 	}
 
@@ -1328,30 +1328,50 @@ func cmdSeanceList(logger *events.Logger) error {
 	for _, sess := range sessions {
 		t, _ := time.Parse(time.RFC3339, sess.Time)
 		timeStr := t.Format("2006-01-02 15:04")
-		hasClaude := "  "
+
+		// Determine icon based on session type
+		icon := "  "
 		if sess.ClaudeSession != "" {
-			hasClaude = "💬"
+			if sess.Type == events.EventHubHandoff {
+				icon = "🏠"
+			} else {
+				icon = "💬"
+			}
 		}
+
+		// For hub sessions, show special values
+		beadDisplay := sess.Bead
+		projectDisplay := sess.Project
+		if sess.Type == events.EventHubHandoff {
+			beadDisplay = "(hub)"
+			projectDisplay = "(orchestrator)"
+		}
+
 		fmt.Printf("│  %s %-8s %-18s %-12s %-24s │\n",
-			hasClaude,
+			icon,
 			truncate(sess.Session, 8),
-			truncate(sess.Bead, 18),
-			truncate(sess.Project, 12),
+			truncate(beadDisplay, 18),
+			truncate(projectDisplay, 12),
 			timeStr)
 	}
 
 	fmt.Println("│                                                                       │")
 	fmt.Println("└───────────────────────────────────────────────────────────────────────┘")
-	fmt.Println("\n💬 = Has Claude session (can resume)")
+	fmt.Println("\n💬 = Worker session   🏠 = Hub session")
 	fmt.Println("\nCommands:")
 	fmt.Println("  wt seance <name>           Resume conversation")
 	fmt.Println("  wt seance <name> -p 'msg'  One-shot query")
+	fmt.Println("  wt seance hub              Resume last hub session")
 
 	return nil
 }
 
 func cmdSeanceResume(event *events.Event) error {
-	fmt.Printf("Resuming Claude session for '%s' (bead: %s)...\n", event.Session, event.Bead)
+	if event.Type == events.EventHubHandoff {
+		fmt.Printf("Resuming hub session...\n")
+	} else {
+		fmt.Printf("Resuming Claude session for '%s' (bead: %s)...\n", event.Session, event.Bead)
+	}
 
 	// Run claude with --resume flag
 	cmd := exec.Command("claude", "--resume", event.ClaudeSession)

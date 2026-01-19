@@ -13,6 +13,7 @@ import (
 
 	"github.com/badri/wt/internal/bead"
 	"github.com/badri/wt/internal/config"
+	"github.com/badri/wt/internal/events"
 	"github.com/badri/wt/internal/session"
 )
 
@@ -81,10 +82,19 @@ func Run(cfg *config.Config, opts *Options) (*Result, error) {
 	}
 	result.MarkerWritten = true
 
-	// 4. Clear tmux history (if in tmux)
+	// 4. Log hub handoff event for seance
+	claudeSession := getClaudeSession()
+	if claudeSession != "" {
+		logger := events.NewLogger(cfg)
+		if err := logger.LogHubHandoff(claudeSession, opts.Message); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not log hub handoff: %v\n", err)
+		}
+	}
+
+	// 5. Clear tmux history (if in tmux)
 	clearTmuxHistory()
 
-	// 5. Respawn Claude via tmux
+	// 6. Respawn Claude via tmux
 	if err := respawnClaude(); err != nil {
 		return nil, fmt.Errorf("respawning Claude: %w", err)
 	}
@@ -217,6 +227,16 @@ func getSessionName() string {
 	}
 
 	return "unknown"
+}
+
+// getClaudeSession returns the Claude session ID for seance resumption
+func getClaudeSession() string {
+	// Claude Code sets this environment variable
+	if id := os.Getenv("CLAUDE_SESSION_ID"); id != "" {
+		return id
+	}
+	// Fallback to session name which can also be used
+	return getSessionName()
 }
 
 // clearTmuxHistory clears the tmux pane history
