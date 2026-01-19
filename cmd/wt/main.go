@@ -606,11 +606,11 @@ func cmdProject(cfg *config.Config, args []string) error {
 			return fmt.Errorf("usage: wt project config <name>")
 		}
 		return cmdProjectConfig(mgr, args[1])
-	case "remove", "rm":
+	case "remove", "rm", "delete":
 		if len(args) < 2 {
 			return fmt.Errorf("usage: wt project remove <name>")
 		}
-		return cmdProjectRemove(mgr, args[1])
+		return cmdProjectRemove(cfg, mgr, args[1])
 	default:
 		return fmt.Errorf("unknown project command: %s", args[0])
 	}
@@ -656,12 +656,38 @@ func cmdProjectConfig(mgr *project.Manager, name string) error {
 	return cmd.Run()
 }
 
-func cmdProjectRemove(mgr *project.Manager, name string) error {
+func cmdProjectRemove(cfg *config.Config, mgr *project.Manager, name string) error {
+	// Check project exists first
+	proj, err := mgr.Get(name)
+	if err != nil {
+		return err
+	}
+
+	// Check for active sessions
+	state, _ := session.LoadState(cfg)
+	var activeSessions []string
+	for sessName, sess := range state.Sessions {
+		if sess.Project == name {
+			activeSessions = append(activeSessions, sessName)
+		}
+	}
+
+	if len(activeSessions) > 0 {
+		return fmt.Errorf("cannot remove project '%s': %d active session(s): %v\nClose or kill sessions first", name, len(activeSessions), activeSessions)
+	}
+
+	fmt.Printf("Removing project '%s'...\n", name)
+	fmt.Printf("  This will:\n")
+	fmt.Printf("    - Remove project registration from wt\n")
+	fmt.Printf("    - NOT delete the repository at %s\n", proj.RepoPath())
+	fmt.Printf("    - NOT delete any beads (managed by bd)\n")
+
 	if err := mgr.Delete(name); err != nil {
 		return err
 	}
 
-	fmt.Printf("Project '%s' removed.\n", name)
+	fmt.Printf("\nProject '%s' removed.\n", name)
+	fmt.Println("To re-register: wt project add", name, proj.Repo)
 	return nil
 }
 
