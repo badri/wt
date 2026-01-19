@@ -648,7 +648,8 @@ Workers inherit `BEADS_DIR` from the project, so bd commands inside workers oper
 | `wt events --tail` | Follow events in real-time |
 | `wt events --new --clear` | Get new events (for hooks) |
 | `wt doctor` | Diagnose setup issues |
-| `wt hub` | Create or attach to hub session |
+| `wt hub` | Create or attach to hub session (with watch pane) |
+| `wt hub --no-watch` | Create hub without watch pane |
 | `wt hub --status` | Show hub status without attaching |
 | `wt hub --detach` | Detach from hub (return to previous) |
 | `wt hub --kill` | Kill hub session (with confirmation) |
@@ -670,12 +671,14 @@ wt hub --status             # Show hub status without attaching
 wt hub --detach             # Detach from hub, return to previous session
 wt hub --kill               # Kill hub session (prompts for confirmation)
 wt hub --kill --force       # Kill hub without confirmation
+wt hub --no-watch           # Create hub without watch pane
 ```
 
 ### Hub Characteristics
 
 - **Session name**: Always "hub"
 - **Working directory**: Home directory (~)
+- **Watch pane**: Right pane with `wt watch` (25% width, skip with `--no-watch`)
 - **No worktree**: Hub doesn't have code isolation
 - **No BEADS_DIR**: Uses bd's project detection
 - **Persistent**: Survives across Claude instances via handoff
