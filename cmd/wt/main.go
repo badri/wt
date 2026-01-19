@@ -104,6 +104,11 @@ func run() error {
 		return cmdPick(cfg)
 	case "keys":
 		return cmdKeys()
+	case "completion":
+		if len(args) < 2 {
+			return fmt.Errorf("usage: wt completion <bash|zsh|fish>")
+		}
+		return cmdCompletion(args[1])
 	default:
 		// Assume it's a session name or bead ID to switch to
 		return cmdSwitch(cfg, args[0])
@@ -1796,3 +1801,206 @@ bind-key S choose-tree -s
 	fmt.Print(keybindings)
 	return nil
 }
+
+// cmdCompletion outputs shell completion scripts
+func cmdCompletion(shell string) error {
+	switch shell {
+	case "bash":
+		fmt.Print(bashCompletion)
+	case "zsh":
+		fmt.Print(zshCompletion)
+	case "fish":
+		fmt.Print(fishCompletion)
+	default:
+		return fmt.Errorf("unsupported shell: %s (use bash, zsh, or fish)", shell)
+	}
+	return nil
+}
+
+const bashCompletion = `# wt bash completion
+# Add to ~/.bashrc: eval "$(wt completion bash)"
+
+_wt_completions() {
+    local cur prev commands
+    COMPREPLY=()
+    cur="${COMP_WORDS[COMP_CWORD]}"
+    prev="${COMP_WORDS[COMP_CWORD-1]}"
+
+    commands="list new kill close done status abandon watch seance projects ready create beads project auto events doctor pick keys completion"
+
+    case "${prev}" in
+        wt)
+            # Complete commands or session names
+            local sessions=$(wt list 2>/dev/null | grep -E '^\│\s+[🟢🟡🔴]' | awk '{print $2}')
+            COMPREPLY=( $(compgen -W "${commands} ${sessions}" -- "${cur}") )
+            return 0
+            ;;
+        new)
+            # Complete bead IDs from ready beads
+            local beads=$(wt ready 2>/dev/null | grep -E '^\│\s+[a-z]+-[a-z0-9]+' | awk '{print $1}' | tr -d '│')
+            COMPREPLY=( $(compgen -W "${beads}" -- "${cur}") )
+            return 0
+            ;;
+        kill|close)
+            # Complete session names
+            local sessions=$(wt list 2>/dev/null | grep -E '^\│\s+[🟢🟡🔴]' | awk '{print $2}')
+            COMPREPLY=( $(compgen -W "${sessions}" -- "${cur}") )
+            return 0
+            ;;
+        seance)
+            # Complete past session names
+            local sessions=$(wt seance 2>/dev/null | grep -E '^\│\s+💬' | awk '{print $2}')
+            COMPREPLY=( $(compgen -W "${sessions}" -- "${cur}") )
+            return 0
+            ;;
+        project)
+            COMPREPLY=( $(compgen -W "add config remove" -- "${cur}") )
+            return 0
+            ;;
+        create|beads|ready)
+            # Complete project names
+            local projects=$(wt projects 2>/dev/null | grep -E '^\│\s+[a-zA-Z]' | awk '{print $1}' | tr -d '│')
+            COMPREPLY=( $(compgen -W "${projects}" -- "${cur}") )
+            return 0
+            ;;
+        completion)
+            COMPREPLY=( $(compgen -W "bash zsh fish" -- "${cur}") )
+            return 0
+            ;;
+        *)
+            COMPREPLY=( $(compgen -W "${commands}" -- "${cur}") )
+            return 0
+            ;;
+    esac
+}
+
+complete -F _wt_completions wt
+`
+
+const zshCompletion = `#compdef wt
+# wt zsh completion
+# Add to ~/.zshrc: eval "$(wt completion zsh)"
+
+_wt() {
+    local -a commands sessions beads projects
+
+    commands=(
+        'list:List active sessions'
+        'new:Create new session for a bead'
+        'kill:Kill a session (keep bead open)'
+        'close:Close session and bead'
+        'done:Complete work and merge'
+        'status:Show current session status'
+        'abandon:Abandon session without merging'
+        'watch:Live dashboard of sessions'
+        'seance:Talk to past sessions'
+        'projects:List registered projects'
+        'ready:Show ready beads'
+        'create:Create a new bead'
+        'beads:List beads for a project'
+        'project:Manage projects'
+        'auto:Autonomous batch processing'
+        'events:Show wt events'
+        'doctor:Check wt setup'
+        'pick:Interactive session picker'
+        'keys:Output tmux keybindings'
+        'completion:Generate shell completions'
+    )
+
+    _arguments -C \
+        '1: :->command' \
+        '*: :->args'
+
+    case $state in
+        command)
+            _describe 'command' commands
+            # Also complete session names
+            local -a sess
+            sess=(${(f)"$(wt list 2>/dev/null | grep -E '^\│\s+[🟢🟡🔴]' | awk '{print $2}')"})
+            [[ -n "$sess" ]] && _describe 'session' sess
+            ;;
+        args)
+            case $words[2] in
+                new)
+                    local -a beads
+                    beads=(${(f)"$(wt ready 2>/dev/null | grep -E '^\│\s+[a-z]+-[a-z0-9]+' | awk '{print $1}' | tr -d '│')"})
+                    _describe 'bead' beads
+                    ;;
+                kill|close)
+                    local -a sess
+                    sess=(${(f)"$(wt list 2>/dev/null | grep -E '^\│\s+[🟢🟡🔴]' | awk '{print $2}')"})
+                    _describe 'session' sess
+                    ;;
+                seance)
+                    local -a sess
+                    sess=(${(f)"$(wt seance 2>/dev/null | grep -E '^\│\s+💬' | awk '{print $2}')"})
+                    _describe 'session' sess
+                    ;;
+                project)
+                    _describe 'subcommand' '(add config remove)'
+                    ;;
+                create|beads|ready)
+                    local -a proj
+                    proj=(${(f)"$(wt projects 2>/dev/null | grep -E '^\│\s+[a-zA-Z]' | awk '{print $1}' | tr -d '│')"})
+                    _describe 'project' proj
+                    ;;
+                completion)
+                    _describe 'shell' '(bash zsh fish)'
+                    ;;
+            esac
+            ;;
+    esac
+}
+
+_wt "$@"
+`
+
+const fishCompletion = `# wt fish completion
+# Add to ~/.config/fish/completions/wt.fish
+
+# Disable file completion by default
+complete -c wt -f
+
+# Commands
+complete -c wt -n __fish_use_subcommand -a list -d 'List active sessions'
+complete -c wt -n __fish_use_subcommand -a new -d 'Create new session for a bead'
+complete -c wt -n __fish_use_subcommand -a kill -d 'Kill a session (keep bead open)'
+complete -c wt -n __fish_use_subcommand -a close -d 'Close session and bead'
+complete -c wt -n __fish_use_subcommand -a done -d 'Complete work and merge'
+complete -c wt -n __fish_use_subcommand -a status -d 'Show current session status'
+complete -c wt -n __fish_use_subcommand -a abandon -d 'Abandon session without merging'
+complete -c wt -n __fish_use_subcommand -a watch -d 'Live dashboard of sessions'
+complete -c wt -n __fish_use_subcommand -a seance -d 'Talk to past sessions'
+complete -c wt -n __fish_use_subcommand -a projects -d 'List registered projects'
+complete -c wt -n __fish_use_subcommand -a ready -d 'Show ready beads'
+complete -c wt -n __fish_use_subcommand -a create -d 'Create a new bead'
+complete -c wt -n __fish_use_subcommand -a beads -d 'List beads for a project'
+complete -c wt -n __fish_use_subcommand -a project -d 'Manage projects'
+complete -c wt -n __fish_use_subcommand -a auto -d 'Autonomous batch processing'
+complete -c wt -n __fish_use_subcommand -a events -d 'Show wt events'
+complete -c wt -n __fish_use_subcommand -a doctor -d 'Check wt setup'
+complete -c wt -n __fish_use_subcommand -a pick -d 'Interactive session picker'
+complete -c wt -n __fish_use_subcommand -a keys -d 'Output tmux keybindings'
+complete -c wt -n __fish_use_subcommand -a completion -d 'Generate shell completions'
+
+# Session names for bare wt command
+complete -c wt -n __fish_use_subcommand -a "(wt list 2>/dev/null | grep -E '^\│\s+[🟢🟡🔴]' | awk '{print \$2}')" -d 'Switch to session'
+
+# Completions for 'new' - bead IDs
+complete -c wt -n '__fish_seen_subcommand_from new' -a "(wt ready 2>/dev/null | grep -E '^\│\s+[a-z]+-[a-z0-9]+' | awk '{print \$1}' | tr -d '│')" -d 'Bead'
+
+# Completions for 'kill' and 'close' - session names
+complete -c wt -n '__fish_seen_subcommand_from kill close' -a "(wt list 2>/dev/null | grep -E '^\│\s+[🟢🟡🔴]' | awk '{print \$2}')" -d 'Session'
+
+# Completions for 'seance' - past sessions
+complete -c wt -n '__fish_seen_subcommand_from seance' -a "(wt seance 2>/dev/null | grep -E '^\│\s+💬' | awk '{print \$2}')" -d 'Past session'
+
+# Completions for 'project' subcommand
+complete -c wt -n '__fish_seen_subcommand_from project' -a 'add config remove' -d 'Project subcommand'
+
+# Completions for 'create', 'beads', 'ready' - project names
+complete -c wt -n '__fish_seen_subcommand_from create beads ready' -a "(wt projects 2>/dev/null | grep -E '^\│\s+[a-zA-Z]' | awk '{print \$1}' | tr -d '│')" -d 'Project'
+
+# Completions for 'completion' - shell types
+complete -c wt -n '__fish_seen_subcommand_from completion' -a 'bash zsh fish' -d 'Shell'
+`
