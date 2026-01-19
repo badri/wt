@@ -679,8 +679,11 @@ func cmdProjectRemove(cfg *config.Config, mgr *project.Manager, name string) err
 	fmt.Printf("Removing project '%s'...\n", name)
 	fmt.Printf("  This will:\n")
 	fmt.Printf("    - Remove project registration from wt\n")
-	fmt.Printf("    - NOT delete the repository at %s\n", proj.RepoPath())
-	fmt.Printf("    - NOT delete any beads (managed by bd)\n")
+	fmt.Printf("  This will NOT:\n")
+	fmt.Printf("    - Delete the repository at %s\n", proj.RepoPath())
+	fmt.Printf("    - Delete any beads (managed by bd)\n")
+	fmt.Printf("    - Delete any open PRs on GitHub\n")
+	fmt.Printf("    - Clean up orphaned worktrees (use: git worktree prune)\n")
 
 	if err := mgr.Delete(name); err != nil {
 		return err
