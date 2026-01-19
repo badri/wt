@@ -69,7 +69,7 @@ func run() error {
 		return cmdReady(cfg, projectFilter)
 	case "project":
 		if len(args) < 2 {
-			return fmt.Errorf("usage: wt project <add|config> ...")
+			return fmt.Errorf("usage: wt project <add|config|remove> ...")
 		}
 		return cmdProject(cfg, args[1:])
 	default:
@@ -590,7 +590,7 @@ func cmdReady(cfg *config.Config, projectFilter string) error {
 
 func cmdProject(cfg *config.Config, args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: wt project <add|config> ...")
+		return fmt.Errorf("usage: wt project <add|config|remove> ...")
 	}
 
 	mgr := project.NewManager(cfg)
