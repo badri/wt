@@ -19,8 +19,8 @@ func TestLoadFromDir_CreatesDefaultFiles(t *testing.T) {
 	if cfg.WorktreeRoot != "~/worktrees" {
 		t.Errorf("expected WorktreeRoot '~/worktrees', got %q", cfg.WorktreeRoot)
 	}
-	if cfg.EditorCmd != "claude" {
-		t.Errorf("expected EditorCmd 'claude', got %q", cfg.EditorCmd)
+	if cfg.EditorCmd != "claude --dangerously-skip-permissions" {
+		t.Errorf("expected EditorCmd 'claude --dangerously-skip-permissions', got %q", cfg.EditorCmd)
 	}
 	if cfg.DefaultMergeMode != "pr-review" {
 		t.Errorf("expected DefaultMergeMode 'pr-review', got %q", cfg.DefaultMergeMode)

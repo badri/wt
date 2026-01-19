@@ -27,7 +27,7 @@ func Load() (*Config, error) {
 func LoadFromDir(configDir string) (*Config, error) {
 	cfg := &Config{
 		WorktreeRoot:     "~/worktrees",
-		EditorCmd:        "claude",
+		EditorCmd:        "claude --dangerously-skip-permissions",
 		DefaultMergeMode: "pr-review",
 		configDir:        configDir,
 	}
