@@ -306,9 +306,15 @@ func cmdNew(cfg *config.Config, args []string) error {
 	time.Sleep(8 * time.Second) // Wait for Claude Code to fully initialize
 	fmt.Println("Sending initial prompt to worker...")
 	prompt := buildInitialPrompt(beadID, beadInfo.Title, proj)
-	sendPromptCmd := exec.Command("tmux", "send-keys", "-t", sessionName, prompt, "Enter")
+	// Send prompt text
+	sendPromptCmd := exec.Command("tmux", "send-keys", "-t", sessionName, prompt)
 	if err := sendPromptCmd.Run(); err != nil {
 		fmt.Printf("Warning: could not send initial prompt: %v\n", err)
+	}
+	// Send Enter key separately
+	sendEnterCmd := exec.Command("tmux", "send-keys", "-t", sessionName, "Enter")
+	if err := sendEnterCmd.Run(); err != nil {
+		fmt.Printf("Warning: could not send Enter: %v\n", err)
 	}
 
 	// Determine if we should switch
