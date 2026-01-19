@@ -305,6 +305,83 @@ wt seance toast -p "What blocked you?"  # One-shot question
 
 ---
 
+## Autonomous Batch Processing
+
+Run beads overnight or unattended with `wt auto`.
+
+### Basic Usage
+
+```bash
+wt auto                     # Process all ready beads across all projects
+wt auto --project myapp     # Only beads from specific project
+wt auto --dry-run           # Preview what would run
+wt auto --check             # Validate beads are well-groomed
+```
+
+### How It Works
+
+1. Acquires lock (`~/.config/wt/auto.lock`) - only one auto run at a time
+2. Gets ready beads from all projects (or filtered by `--project`)
+3. For each bead:
+   - Creates session: `wt new <bead> --no-switch`
+   - Runs Claude with prompt template
+   - Waits for completion or timeout
+   - Logs result to `~/.config/wt/logs/auto-<timestamp>.log`
+4. Checks for stop signal between beads
+5. Continues until all beads processed
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--project <name>` | Filter to specific project |
+| `--dry-run` | Show what would run without executing |
+| `--check` | Validate beads have title/description |
+| `--stop` | Signal running auto to stop after current bead |
+| `--timeout <minutes>` | Override default 30min timeout |
+| `--merge-mode <mode>` | Override project merge mode |
+| `--force` | Override lock (risky) |
+
+### Stopping a Running Auto
+
+```bash
+wt auto --stop              # Graceful stop after current bead
+```
+
+Or create stop file: `touch ~/.config/wt/stop-auto`
+
+The current bead continues to completion, then auto exits.
+
+### Logs
+
+Auto runs are logged to `~/.config/wt/logs/auto-<timestamp>.log`:
+- Start/end times
+- Per-bead: ID, outcome (success/fail/timeout), duration
+
+### When to Use
+
+- **Overnight batch**: Groom beads during day, run auto overnight
+- **CI integration**: Trigger auto from CI pipeline
+- **Backlog clearing**: Process accumulated ready beads
+
+### Example: Overnight Workflow
+
+```bash
+# During day: groom beads
+bd ready                    # Review what's ready
+bd show project-xyz         # Check each has good description
+
+# Before leaving
+wt auto --check             # Verify all groomed
+wt auto                     # Start batch run
+
+# Next morning
+cat ~/.config/wt/logs/auto-*.log | tail -50  # Check results
+wt                          # See any sessions still running
+```
+
+---
+
 ## Common Patterns
 
 ### Pattern 1: Morning Workflow
@@ -450,6 +527,9 @@ Workers inherit `BEADS_DIR` from the project, so bd commands inside workers oper
 | `wt beads <project>` | List beads for project |
 | `wt seance` | List past sessions |
 | `wt seance <name>` | Talk to past session |
+| `wt auto` | Process ready beads autonomously |
+| `wt auto --dry-run` | Preview auto run |
+| `wt auto --stop` | Stop running auto gracefully |
 
 ---
 
