@@ -109,6 +109,7 @@ func TestBuildInitialPrompt(t *testing.T) {
 				"Implement the task",
 				"Commit your changes",
 				"Create a PR",
+				"wt signal ready",
 				"Do NOT run `wt done`",
 			},
 			wantNotContains: []string{
@@ -125,7 +126,7 @@ func TestBuildInitialPrompt(t *testing.T) {
 			wantContains: []string{
 				"Work on bead test-456: Add feature.",
 				"Create a PR",
-				"ready for review",
+				"wt signal ready",
 				"Do NOT run `wt done`",
 			},
 			wantNotContains: []string{
@@ -141,7 +142,7 @@ func TestBuildInitialPrompt(t *testing.T) {
 			},
 			wantContains: []string{
 				"Push your changes",
-				"work is complete",
+				"wt signal ready",
 				"Do NOT run `wt done`",
 			},
 		},
@@ -154,6 +155,7 @@ func TestBuildInitialPrompt(t *testing.T) {
 			},
 			wantContains: []string{
 				"Create a PR",
+				"wt signal ready",
 				"cleanup after merge",
 				"Do NOT run `wt done`",
 			},
@@ -200,4 +202,27 @@ func contains(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+func TestGetStatusIcon(t *testing.T) {
+	tests := []struct {
+		status string
+		want   string
+	}{
+		{"ready", "✅"},
+		{"blocked", "🚫"},
+		{"error", "❌"},
+		{"working", "🔄"},
+		{"idle", "💤"},
+		{"unknown", "•"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.status, func(t *testing.T) {
+			got := getStatusIcon(tt.status)
+			if got != tt.want {
+				t.Errorf("getStatusIcon(%q) = %q, want %q", tt.status, got, tt.want)
+			}
+		})
+	}
 }

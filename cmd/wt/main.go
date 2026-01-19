@@ -76,6 +76,11 @@ func run() error {
 		return cmdDone(cfg, parseDoneFlags(args[1:]))
 	case "status":
 		return cmdStatus(cfg)
+	case "signal":
+		if len(args) < 2 {
+			return fmt.Errorf("usage: wt signal <status> [message]\n  status: ready, blocked, error, working")
+		}
+		return cmdSignal(cfg, args[1:])
 	case "abandon":
 		return cmdAbandon(cfg)
 	case "watch":
@@ -452,13 +457,19 @@ func buildInitialPrompt(beadID, title string, proj *project.Project) string {
 	switch mergeMode {
 	case "direct":
 		sb.WriteString("4. Push your changes\n")
-		sb.WriteString("\nWhen finished, notify that work is complete. Do NOT run `wt done` - the hub will handle cleanup.")
+		sb.WriteString("\nWhen finished, signal completion:\n")
+		sb.WriteString("  wt signal ready \"Changes pushed\"\n")
+		sb.WriteString("\nDo NOT run `wt done` - the hub will handle cleanup.")
 	case "pr-auto":
 		sb.WriteString("4. Create a PR with `gh pr create`\n")
-		sb.WriteString("\nWhen finished, notify that PR is ready. Do NOT run `wt done` - the hub will handle cleanup after merge.")
+		sb.WriteString("\nWhen finished, signal completion with the PR URL:\n")
+		sb.WriteString("  wt signal ready \"PR: <paste PR URL here>\"\n")
+		sb.WriteString("\nDo NOT run `wt done` - the hub will handle cleanup after merge.")
 	case "pr-review":
 		sb.WriteString("4. Create a PR with `gh pr create`\n")
-		sb.WriteString("\nWhen finished, notify that PR is ready for review. Do NOT run `wt done` - the hub will handle cleanup after review.")
+		sb.WriteString("\nWhen finished, signal completion with the PR URL:\n")
+		sb.WriteString("  wt signal ready \"PR: <paste PR URL here>\"\n")
+		sb.WriteString("\nDo NOT run `wt done` - the hub will handle cleanup after review.")
 	}
 
 	return sb.String()
@@ -1147,9 +1158,93 @@ func cmdStatus(cfg *config.Config) error {
 
 	fmt.Println("│                                                                       │")
 	fmt.Println("└───────────────────────────────────────────────────────────────────────┘")
-	fmt.Println("\nCommands: wt done | wt abandon")
+	fmt.Println("\nCommands: wt done | wt abandon | wt signal <status>")
 
 	return nil
+}
+
+// cmdSignal updates the session status with an optional message
+func cmdSignal(cfg *config.Config, args []string) error {
+	status := args[0]
+
+	// Validate status
+	validStatuses := map[string]bool{
+		"working": true,
+		"ready":   true,
+		"blocked": true,
+		"error":   true,
+		"idle":    true,
+	}
+	if !validStatuses[status] {
+		return fmt.Errorf("invalid status: %s\nvalid statuses: working, ready, blocked, error, idle", status)
+	}
+
+	// Get optional message
+	message := ""
+	if len(args) > 1 {
+		message = strings.Join(args[1:], " ")
+	}
+
+	// Find current session
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("getting current directory: %w", err)
+	}
+
+	state, err := session.LoadState(cfg)
+	if err != nil {
+		return err
+	}
+
+	var sessionName string
+	var sess *session.Session
+	for name, s := range state.Sessions {
+		if s.Worktree == cwd {
+			sessionName = name
+			sess = s
+			break
+		}
+	}
+
+	if sess == nil {
+		return fmt.Errorf("not in a wt session. Run this from inside a session worktree")
+	}
+
+	// Update status
+	sess.Status = status
+	sess.StatusMessage = message
+	sess.UpdateActivity()
+
+	if err := state.Save(); err != nil {
+		return fmt.Errorf("saving state: %w", err)
+	}
+
+	// Display confirmation
+	statusIcon := getStatusIcon(status)
+	fmt.Printf("%s Session '%s' status: %s\n", statusIcon, sessionName, status)
+	if message != "" {
+		fmt.Printf("   Message: %s\n", message)
+	}
+
+	return nil
+}
+
+// getStatusIcon returns an icon for the given status
+func getStatusIcon(status string) string {
+	switch status {
+	case "ready":
+		return "✅"
+	case "blocked":
+		return "🚫"
+	case "error":
+		return "❌"
+	case "working":
+		return "🔄"
+	case "idle":
+		return "💤"
+	default:
+		return "•"
+	}
 }
 
 // cmdAbandon abandons the current session without merging
@@ -1271,8 +1366,11 @@ func cmdWatch(cfg *config.Config) error {
 				"", "────", "────", "──────", "────", "──", "───────")
 
 			for name, sess := range state.Sessions {
-				// Detect status from tmux activity
-				status := monitor.DetectStatus(name, idleThreshold)
+				// Use session status if set, otherwise detect from tmux
+				status := sess.Status
+				if status == "" {
+					status = monitor.DetectStatus(name, idleThreshold)
+				}
 				idleMin := monitor.GetIdleMinutes(name)
 
 				// Get PR status
@@ -1288,14 +1386,19 @@ func cmdWatch(cfg *config.Config) error {
 					}
 				}
 
-				// Format PR status
+				// Format PR/message status - prefer status message if set
 				prStr := "-"
-				if prStatus != "none" && prStatus != "" {
+				if sess.StatusMessage != "" {
+					prStr = sess.StatusMessage
+				} else if prStatus != "none" && prStatus != "" {
 					prStr = prStatus
 				}
 
-				statusIcon := monitor.StatusIcon(status)
+				statusIcon := getStatusIcon(status)
 				prIcon := monitor.PRStatusIcon(prStatus)
+				if sess.StatusMessage != "" {
+					prIcon = "" // Don't show PR icon when we have a message
+				}
 
 				fmt.Printf("│  %s %-10s %-18s %-8s %-6s %s %-8s %-6s │\n",
 					statusIcon,
@@ -1310,10 +1413,22 @@ func cmdWatch(cfg *config.Config) error {
 				// Send notification on status change
 				prevStatus, exists := prevStates[name]
 				if exists && prevStatus != status {
-					if status == "idle" {
+					if status == "ready" {
+						msg := fmt.Sprintf("Session '%s' is ready for review", name)
+						if sess.StatusMessage != "" {
+							msg = fmt.Sprintf("Session '%s': %s", name, sess.StatusMessage)
+						}
+						monitor.Notify("wt: Ready for Review", msg)
+					} else if status == "idle" {
 						monitor.Notify("wt: Session Idle", fmt.Sprintf("Session '%s' is now idle", name))
 					} else if status == "error" {
 						monitor.Notify("wt: Session Error", fmt.Sprintf("Session '%s' has an error", name))
+					} else if status == "blocked" {
+						msg := fmt.Sprintf("Session '%s' is blocked", name)
+						if sess.StatusMessage != "" {
+							msg = fmt.Sprintf("Session '%s': %s", name, sess.StatusMessage)
+						}
+						monitor.Notify("wt: Session Blocked", msg)
 					}
 				}
 				prevStates[name] = status
@@ -2207,6 +2322,8 @@ Session Management:
   close <name>     Close session and bead
   done             Complete work and merge (from inside worker)
   status           Show current session status (from inside worker)
+  signal <status>  Update session status with message (from inside worker)
+                   status: ready, blocked, error, working, idle
   abandon          Discard work, keep bead open (from inside worker)
   pick             Interactive session picker (uses fzf if available)
 

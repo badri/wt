@@ -625,6 +625,9 @@ Workers inherit `BEADS_DIR` from the project, so bd commands inside workers oper
 | `wt <name>` | Switch to session |
 | `wt watch` | Live monitoring |
 | `wt status` | Current session info (in worker) |
+| `wt signal ready "msg"` | Signal work complete (in worker) |
+| `wt signal blocked "msg"` | Signal blocked (in worker) |
+| `wt signal error "msg"` | Signal error (in worker) |
 | `wt done` | Submit work (in worker) |
 | `wt close <name>` | Complete + cleanup |
 | `wt kill <name>` | Terminate session |
@@ -714,7 +717,16 @@ wt hub --detach         # Returns to previous session
 2. Commit changes with descriptive message
 3. Run tests (if configured)
 4. Create PR (or push for direct mode)
-5. Notify completion - do NOT run `wt done`
+5. Signal completion: `wt signal ready "PR: <url>"`
+
+**Signaling status:**
+```bash
+wt signal ready "PR: https://github.com/org/repo/pull/123"
+wt signal blocked "Waiting for API credentials"
+wt signal error "Tests failing on CI"
+```
+
+Hub sees status changes in `wt watch` and receives notifications.
 
 ### Hub vs Worker Sessions
 
