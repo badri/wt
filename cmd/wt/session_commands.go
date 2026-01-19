@@ -300,10 +300,11 @@ func cmdNew(cfg *config.Config, args []string) error {
 	fmt.Printf("  Worktree: %s\n", worktreePath)
 	fmt.Printf("  Branch:   %s\n", beadID)
 
-	// Send initial work prompt to Claude after a short delay
+	// Send initial work prompt to Claude after delay for startup
 	// Run synchronously to ensure prompt is sent before wt exits
+	fmt.Println("Waiting for Claude to start...")
+	time.Sleep(8 * time.Second) // Wait for Claude Code to fully initialize
 	fmt.Println("Sending initial prompt to worker...")
-	time.Sleep(2 * time.Second) // Wait for Claude to start
 	prompt := buildInitialPrompt(beadID, beadInfo.Title, proj)
 	sendPromptCmd := exec.Command("tmux", "send-keys", "-t", sessionName, prompt, "Enter")
 	if err := sendPromptCmd.Run(); err != nil {
