@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -23,6 +24,14 @@ import (
 	"github.com/badri/wt/internal/testenv"
 	"github.com/badri/wt/internal/tmux"
 	"github.com/badri/wt/internal/worktree"
+)
+
+// Version information - set via ldflags at build time
+// Example: go build -ldflags "-X main.version=1.0.0 -X main.commit=$(git rev-parse --short HEAD) -X main.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+var (
+	version = "dev"
+	commit  = "unknown"
+	date    = "unknown"
 )
 
 func main() {
@@ -109,6 +118,8 @@ func run() error {
 			return fmt.Errorf("usage: wt completion <bash|zsh|fish>")
 		}
 		return cmdCompletion(args[1])
+	case "version", "--version", "-v":
+		return cmdVersion()
 	default:
 		// Assume it's a session name or bead ID to switch to
 		return cmdSwitch(cfg, args[0])
@@ -2004,3 +2015,13 @@ complete -c wt -n '__fish_seen_subcommand_from create beads ready' -a "(wt proje
 # Completions for 'completion' - shell types
 complete -c wt -n '__fish_seen_subcommand_from completion' -a 'bash zsh fish' -d 'Shell'
 `
+
+// cmdVersion prints version information
+func cmdVersion() error {
+	fmt.Printf("wt version %s\n", version)
+	fmt.Printf("  commit:  %s\n", commit)
+	fmt.Printf("  built:   %s\n", date)
+	fmt.Printf("  go:      %s\n", runtime.Version())
+	fmt.Printf("  os/arch: %s/%s\n", runtime.GOOS, runtime.GOARCH)
+	return nil
+}
