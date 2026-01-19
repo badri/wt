@@ -8,6 +8,7 @@ import (
 
 	"github.com/badri/wt/internal/bead"
 	"github.com/badri/wt/internal/config"
+	"github.com/badri/wt/internal/merge"
 	"github.com/badri/wt/internal/namepool"
 	"github.com/badri/wt/internal/project"
 	"github.com/badri/wt/internal/session"
@@ -52,6 +53,12 @@ func run() error {
 			return fmt.Errorf("usage: wt close <name>")
 		}
 		return cmdClose(cfg, args[1])
+	case "done":
+		return cmdDone(cfg, parseDoneFlags(args[1:]))
+	case "status":
+		return cmdStatus(cfg)
+	case "abandon":
+		return cmdAbandon(cfg)
 	case "projects":
 		return cmdProjects(cfg)
 	case "ready":
@@ -655,5 +662,333 @@ func cmdProjectRemove(mgr *project.Manager, name string) error {
 	}
 
 	fmt.Printf("Project '%s' removed.\n", name)
+	return nil
+}
+
+type doneFlags struct {
+	mergeMode string
+}
+
+func parseDoneFlags(args []string) doneFlags {
+	var flags doneFlags
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--merge-mode", "-m":
+			if i+1 < len(args) {
+				flags.mergeMode = args[i+1]
+				i++
+			}
+		}
+	}
+	return flags
+}
+
+// cmdDone completes the current session's work and merges based on mode
+func cmdDone(cfg *config.Config, flags doneFlags) error {
+	// Find current session by checking if we're in a worktree
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("getting current directory: %w", err)
+	}
+
+	state, err := session.LoadState(cfg)
+	if err != nil {
+		return err
+	}
+
+	// Find session that matches current directory
+	var sessionName string
+	var sess *session.Session
+	for name, s := range state.Sessions {
+		if s.Worktree == cwd {
+			sessionName = name
+			sess = s
+			break
+		}
+	}
+
+	if sess == nil {
+		return fmt.Errorf("not in a wt session. Run this from inside a session worktree")
+	}
+
+	// Check for uncommitted changes
+	hasChanges, err := merge.HasUncommittedChanges(cwd)
+	if err != nil {
+		return err
+	}
+	if hasChanges {
+		return fmt.Errorf("you have uncommitted changes. Commit or stash them first")
+	}
+
+	// Get project config
+	mgr := project.NewManager(cfg)
+	proj, err := mgr.Get(sess.Project)
+	if err != nil {
+		// Fallback to finding by bead prefix
+		proj, err = mgr.FindByBeadPrefix(sess.Bead)
+		if err != nil {
+			return fmt.Errorf("project not found for session: %w", err)
+		}
+	}
+
+	// Determine merge mode (flag overrides project config)
+	mergeMode := proj.MergeMode
+	if flags.mergeMode != "" {
+		mergeMode = flags.mergeMode
+	}
+
+	defaultBranch := proj.DefaultBranch
+	if defaultBranch == "" {
+		defaultBranch = "main"
+	}
+
+	branch := sess.Branch
+	if branch == "" {
+		branch = sess.Bead
+	}
+
+	// Get bead info for PR title
+	beadInfo, err := bead.Show(sess.Bead)
+	if err != nil {
+		return fmt.Errorf("getting bead info: %w", err)
+	}
+	prTitle := beadInfo.Title
+	if prTitle == "" {
+		prTitle = sess.Bead
+	}
+
+	fmt.Printf("Completing session '%s'...\n", sessionName)
+	fmt.Printf("  Bead:       %s\n", sess.Bead)
+	fmt.Printf("  Branch:     %s\n", branch)
+	fmt.Printf("  Merge mode: %s\n", mergeMode)
+
+	switch mergeMode {
+	case "direct":
+		fmt.Println("\nMerging directly to", defaultBranch, "...")
+		if err := merge.DirectMerge(cwd, branch, defaultBranch); err != nil {
+			return fmt.Errorf("direct merge failed: %w", err)
+		}
+		fmt.Println("Merged and pushed successfully.")
+
+	case "pr-auto":
+		fmt.Println("\nCreating PR with auto-merge...")
+		prURL, err := merge.CreatePR(cwd, branch, defaultBranch, prTitle)
+		if err != nil {
+			return fmt.Errorf("creating PR: %w", err)
+		}
+		fmt.Printf("PR created: %s\n", prURL)
+
+		if err := merge.EnableAutoMerge(cwd, prURL); err != nil {
+			fmt.Printf("Warning: could not enable auto-merge: %v\n", err)
+			fmt.Println("PR created but you'll need to merge manually.")
+		} else {
+			fmt.Println("Auto-merge enabled. PR will merge when checks pass.")
+		}
+
+	case "pr-review":
+		fmt.Println("\nCreating PR for review...")
+		prURL, err := merge.CreatePR(cwd, branch, defaultBranch, prTitle)
+		if err != nil {
+			return fmt.Errorf("creating PR: %w", err)
+		}
+		fmt.Printf("PR created: %s\n", prURL)
+		fmt.Println("Waiting for review.")
+
+	default:
+		return fmt.Errorf("unknown merge mode: %s", mergeMode)
+	}
+
+	// Close the bead
+	fmt.Println("\nClosing bead...")
+	if err := bead.Close(sess.Bead); err != nil {
+		fmt.Printf("Warning: could not close bead: %v\n", err)
+	}
+
+	// Run teardown hooks if configured
+	if proj.TestEnv != nil && proj.TestEnv.Teardown != "" {
+		fmt.Println("Running test environment teardown...")
+		if err := testenv.RunTeardown(proj, sess.Worktree, sess.PortOffset); err != nil {
+			fmt.Printf("Warning: teardown failed: %v\n", err)
+		}
+	}
+
+	if proj.Hooks != nil && len(proj.Hooks.OnClose) > 0 {
+		fmt.Println("Running on_close hooks...")
+		portEnv := ""
+		if proj.TestEnv != nil {
+			portEnv = proj.TestEnv.PortEnv
+		}
+		if err := testenv.RunOnCloseHooks(proj, sess.Worktree, sess.PortOffset, portEnv); err != nil {
+			fmt.Printf("Warning: on_close hook failed: %v\n", err)
+		}
+	}
+
+	// Kill tmux session
+	fmt.Println("Terminating tmux session...")
+	if err := tmux.Kill(sessionName); err != nil {
+		fmt.Printf("Warning: %v\n", err)
+	}
+
+	// Remove worktree
+	fmt.Printf("Removing worktree: %s\n", sess.Worktree)
+	if err := worktree.Remove(sess.Worktree); err != nil {
+		fmt.Printf("Warning: %v\n", err)
+	}
+
+	// Remove from state
+	delete(state.Sessions, sessionName)
+	if err := state.Save(); err != nil {
+		return fmt.Errorf("saving state: %w", err)
+	}
+
+	fmt.Println("\nDone!")
+	return nil
+}
+
+// cmdStatus shows the status of the current session
+func cmdStatus(cfg *config.Config) error {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("getting current directory: %w", err)
+	}
+
+	state, err := session.LoadState(cfg)
+	if err != nil {
+		return err
+	}
+
+	// Find session that matches current directory
+	var sessionName string
+	var sess *session.Session
+	for name, s := range state.Sessions {
+		if s.Worktree == cwd {
+			sessionName = name
+			sess = s
+			break
+		}
+	}
+
+	if sess == nil {
+		return fmt.Errorf("not in a wt session. Run this from inside a session worktree")
+	}
+
+	// Get bead info
+	beadInfo, err := bead.Show(sess.Bead)
+	if err != nil {
+		return fmt.Errorf("getting bead info: %w", err)
+	}
+
+	// Get git status
+	hasChanges, _ := merge.HasUncommittedChanges(cwd)
+	branch, _ := merge.GetCurrentBranch(cwd)
+
+	// Get project info
+	mgr := project.NewManager(cfg)
+	proj, _ := mgr.Get(sess.Project)
+
+	mergeMode := "pr-review"
+	if proj != nil && proj.MergeMode != "" {
+		mergeMode = proj.MergeMode
+	}
+
+	fmt.Println("┌─ Session Status ─────────────────────────────────────────────────────┐")
+	fmt.Println("│                                                                       │")
+	fmt.Printf("│  Session:    %-55s │\n", sessionName)
+	fmt.Printf("│  Bead:       %-55s │\n", sess.Bead)
+	fmt.Printf("│  Title:      %-55s │\n", truncate(beadInfo.Title, 55))
+	fmt.Printf("│  Project:    %-55s │\n", sess.Project)
+	fmt.Printf("│  Branch:     %-55s │\n", branch)
+	fmt.Printf("│  Merge mode: %-55s │\n", mergeMode)
+	fmt.Println("│                                                                       │")
+
+	if hasChanges {
+		fmt.Println("│  Git:        ⚠ Uncommitted changes                                    │")
+	} else {
+		fmt.Println("│  Git:        ✓ Clean                                                  │")
+	}
+
+	if sess.PortOffset > 0 {
+		portInfo := fmt.Sprintf("Port offset: %d", sess.PortOffset)
+		fmt.Printf("│  %-67s │\n", portInfo)
+	}
+
+	fmt.Println("│                                                                       │")
+	fmt.Println("└───────────────────────────────────────────────────────────────────────┘")
+	fmt.Println("\nCommands: wt done | wt abandon")
+
+	return nil
+}
+
+// cmdAbandon abandons the current session without merging
+func cmdAbandon(cfg *config.Config) error {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("getting current directory: %w", err)
+	}
+
+	state, err := session.LoadState(cfg)
+	if err != nil {
+		return err
+	}
+
+	// Find session that matches current directory
+	var sessionName string
+	var sess *session.Session
+	for name, s := range state.Sessions {
+		if s.Worktree == cwd {
+			sessionName = name
+			sess = s
+			break
+		}
+	}
+
+	if sess == nil {
+		return fmt.Errorf("not in a wt session. Run this from inside a session worktree")
+	}
+
+	fmt.Printf("Abandoning session '%s'...\n", sessionName)
+	fmt.Printf("  Bead: %s (will remain open)\n", sess.Bead)
+
+	// Run teardown hooks if configured
+	mgr := project.NewManager(cfg)
+	if proj, _ := mgr.Get(sess.Project); proj != nil {
+		if proj.TestEnv != nil && proj.TestEnv.Teardown != "" {
+			fmt.Println("  Running test environment teardown...")
+			if err := testenv.RunTeardown(proj, sess.Worktree, sess.PortOffset); err != nil {
+				fmt.Printf("  Warning: teardown failed: %v\n", err)
+			}
+		}
+
+		if proj.Hooks != nil && len(proj.Hooks.OnClose) > 0 {
+			fmt.Println("  Running on_close hooks...")
+			portEnv := ""
+			if proj.TestEnv != nil {
+				portEnv = proj.TestEnv.PortEnv
+			}
+			if err := testenv.RunOnCloseHooks(proj, sess.Worktree, sess.PortOffset, portEnv); err != nil {
+				fmt.Printf("  Warning: on_close hook failed: %v\n", err)
+			}
+		}
+	}
+
+	// Kill tmux session
+	fmt.Println("  Terminating tmux session...")
+	if err := tmux.Kill(sessionName); err != nil {
+		fmt.Printf("  Warning: %v\n", err)
+	}
+
+	// Remove worktree
+	fmt.Printf("  Removing worktree: %s\n", sess.Worktree)
+	if err := worktree.Remove(sess.Worktree); err != nil {
+		fmt.Printf("  Warning: %v\n", err)
+	}
+
+	// Remove from state
+	delete(state.Sessions, sessionName)
+	if err := state.Save(); err != nil {
+		return fmt.Errorf("saving state: %w", err)
+	}
+
+	fmt.Printf("\nSession abandoned. Bead %s is still open.\n", sess.Bead)
 	return nil
 }
