@@ -642,6 +642,78 @@ Workers inherit `BEADS_DIR` from the project, so bd commands inside workers oper
 | `wt events --tail` | Follow events in real-time |
 | `wt events --new --clear` | Get new events (for hooks) |
 | `wt doctor` | Diagnose setup issues |
+| `wt handoff` | Handoff hub to fresh Claude instance |
+| `wt prime` | Inject startup context (for hooks) |
+
+---
+
+## Hub Persistence: Handoff and Prime
+
+Hub sessions can survive compaction and restarts through the handoff system.
+
+### The Problem
+
+When the hub session compacts or restarts:
+- Worker sessions survive (they're in tmux)
+- But hub context is lost
+
+### The Solution: wt handoff
+
+**From hub session:**
+```bash
+wt handoff                  # Cycle to fresh Claude, preserve context
+wt handoff -m "notes"       # Include custom message
+wt handoff -c               # Auto-collect state (sessions, ready beads)
+wt handoff --dry-run        # Preview what would be collected
+```
+
+**What happens:**
+1. Collects context (active sessions, ready beads, in-progress work)
+2. Stores in "Hub Handoff" bead (persists in beads)
+3. Writes handoff marker file
+4. Clears tmux history
+5. Respawns fresh Claude via `tmux respawn-pane`
+
+### Startup: wt prime
+
+**New Claude session runs:**
+```bash
+wt prime                    # Inject context from previous session
+wt prime --quiet            # Suppress non-essential output
+wt prime --no-bd-prime      # Skip running bd prime
+```
+
+**What happens:**
+1. Checks for handoff marker (detects post-handoff state)
+2. Shows warning: "DO NOT run /handoff - that was your predecessor"
+3. Injects handoff content from bead
+4. Runs `bd prime` for beads context
+
+### Claude Code Hook Integration
+
+Add to `.claude/settings.json`:
+```json
+{
+  "hooks": {
+    "SessionStart": ["wt prime"]
+  }
+}
+```
+
+This auto-primes new sessions with handoff context.
+
+### When to Use Handoff
+
+- **Context bloat**: Session growing slow, need fresh start
+- **Before leaving**: Save state before stepping away
+- **After major decision**: Checkpoint before moving on
+
+### Key Points
+
+- Worker sessions survive handoff (they're in tmux)
+- Handoff bead persists context in beads database
+- Marker file prevents "handoff loop" bug
+- `wt prime` clears marker after reading
 
 ---
 

@@ -16,6 +16,7 @@ import (
 	"github.com/badri/wt/internal/config"
 	"github.com/badri/wt/internal/doctor"
 	"github.com/badri/wt/internal/events"
+	"github.com/badri/wt/internal/handoff"
 	"github.com/badri/wt/internal/merge"
 	"github.com/badri/wt/internal/monitor"
 	"github.com/badri/wt/internal/namepool"
@@ -120,6 +121,10 @@ func run() error {
 		return cmdCompletion(args[1])
 	case "version", "--version", "-v":
 		return cmdVersion()
+	case "handoff":
+		return cmdHandoff(cfg, args[1:])
+	case "prime":
+		return cmdPrime(cfg, args[1:])
 	default:
 		// Assume it's a session name or bead ID to switch to
 		return cmdSwitch(cfg, args[0])
@@ -1857,7 +1862,7 @@ _wt_completions() {
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
 
-    commands="list new kill close done status abandon watch seance projects ready create beads project auto events doctor pick keys completion"
+    commands="list new kill close done status abandon watch seance projects ready create beads project auto events doctor pick keys completion handoff prime"
 
     case "${prev}" in
         wt)
@@ -1936,6 +1941,8 @@ _wt() {
         'pick:Interactive session picker'
         'keys:Output tmux keybindings'
         'completion:Generate shell completions'
+        'handoff:Handoff to fresh Claude instance'
+        'prime:Inject startup context'
     )
 
     _arguments -C \
@@ -2013,6 +2020,8 @@ complete -c wt -n __fish_use_subcommand -a doctor -d 'Check wt setup'
 complete -c wt -n __fish_use_subcommand -a pick -d 'Interactive session picker'
 complete -c wt -n __fish_use_subcommand -a keys -d 'Output tmux keybindings'
 complete -c wt -n __fish_use_subcommand -a completion -d 'Generate shell completions'
+complete -c wt -n __fish_use_subcommand -a handoff -d 'Handoff to fresh Claude instance'
+complete -c wt -n __fish_use_subcommand -a prime -d 'Inject startup context'
 
 # Session names for bare wt command
 complete -c wt -n __fish_use_subcommand -a "(wt list 2>/dev/null | grep -E '^\│\s+[🟢🟡🔴]' | awk '{print \$2}')" -d 'Switch to session'
@@ -2044,4 +2053,79 @@ func cmdVersion() error {
 	fmt.Printf("  go:      %s\n", runtime.Version())
 	fmt.Printf("  os/arch: %s/%s\n", runtime.GOOS, runtime.GOARCH)
 	return nil
+}
+
+// cmdHandoff performs a session handoff to a fresh Claude instance
+func cmdHandoff(cfg *config.Config, args []string) error {
+	opts := parseHandoffFlags(args)
+
+	// Check if we're in tmux
+	if !handoff.IsInTmux() {
+		return fmt.Errorf("handoff requires running inside a tmux session")
+	}
+
+	fmt.Println("Performing handoff to fresh Claude instance...")
+
+	result, err := handoff.Run(cfg, opts)
+	if err != nil {
+		return err
+	}
+
+	if opts.DryRun {
+		return nil
+	}
+
+	if result.BeadUpdated {
+		fmt.Println("  ✓ Handoff bead updated")
+	}
+	if result.MarkerWritten {
+		fmt.Println("  ✓ Handoff marker written")
+	}
+
+	fmt.Println("\nRespawning Claude...")
+	return nil
+}
+
+func parseHandoffFlags(args []string) *handoff.Options {
+	opts := &handoff.Options{}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "-m", "--message":
+			if i+1 < len(args) {
+				opts.Message = args[i+1]
+				i++
+			}
+		case "-c", "--collect":
+			opts.AutoCollect = true
+		case "--dry-run":
+			opts.DryRun = true
+		}
+	}
+	return opts
+}
+
+// cmdPrime injects context on session startup
+func cmdPrime(cfg *config.Config, args []string) error {
+	opts := parsePrimeFlags(args)
+
+	result, err := handoff.Prime(cfg, opts)
+	if err != nil {
+		return err
+	}
+
+	handoff.OutputPrimeResult(result)
+	return nil
+}
+
+func parsePrimeFlags(args []string) *handoff.PrimeOptions {
+	opts := &handoff.PrimeOptions{}
+	for _, arg := range args {
+		switch arg {
+		case "-q", "--quiet":
+			opts.Quiet = true
+		case "--no-bd-prime":
+			opts.NoBdPrime = true
+		}
+	}
+	return opts
 }

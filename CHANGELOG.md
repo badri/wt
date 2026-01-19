@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `wt handoff` - Handoff hub session to fresh Claude instance with context preservation
+- `wt handoff -m "notes"` - Include custom message in handoff
+- `wt handoff -c` - Auto-collect state (sessions, ready beads, in-progress work)
+- `wt handoff --dry-run` - Preview what would be collected
+- `wt prime` - Inject startup context on new session (for hook integration)
+- `wt prime --quiet` - Suppress non-essential output
+- `wt prime --no-bd-prime` - Skip running bd prime
+- Hub Handoff bead for persistent context storage
+- Handoff marker file for post-handoff detection
+- New bead package functions: List, Search, Create, UpdateDescription
+
 ## [0.1.0] - 2026-01-19
 
 ### Added

@@ -223,3 +223,133 @@ func ListInDir(beadsDir string, status string) ([]ReadyBead, error) {
 
 	return beads, nil
 }
+
+// List returns beads with optional status filter
+func List(status string) ([]ReadyBead, error) {
+	args := []string{"list", "--json"}
+	if status != "" {
+		args = append(args, "--status", status)
+	}
+
+	cmd := exec.Command("bd", args...)
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("listing beads: %w", err)
+	}
+
+	var beads []ReadyBead
+	if err := json.Unmarshal(output, &beads); err != nil {
+		return nil, fmt.Errorf("parsing beads list: %w", err)
+	}
+
+	return beads, nil
+}
+
+// Search searches for beads by title
+func Search(query string) ([]ReadyBead, error) {
+	cmd := exec.Command("bd", "search", query, "--json")
+	output, err := cmd.Output()
+	if err != nil {
+		// Search might not support --json, fall back to list and filter
+		return searchFallback(query)
+	}
+
+	var beads []ReadyBead
+	if err := json.Unmarshal(output, &beads); err != nil {
+		return searchFallback(query)
+	}
+
+	return beads, nil
+}
+
+// searchFallback lists all beads and filters by title
+func searchFallback(query string) ([]ReadyBead, error) {
+	beads, err := List("")
+	if err != nil {
+		return nil, err
+	}
+
+	var results []ReadyBead
+	queryLower := strings.ToLower(query)
+	for _, b := range beads {
+		if strings.Contains(strings.ToLower(b.Title), queryLower) {
+			results = append(results, b)
+		}
+	}
+
+	return results, nil
+}
+
+// Create creates a new bead and returns its ID
+func Create(title string, opts *CreateOptions) (string, error) {
+	args := []string{"create", "--title", title}
+
+	if opts != nil {
+		if opts.Description != "" {
+			args = append(args, "--description", opts.Description)
+		}
+		if opts.Priority >= 0 {
+			args = append(args, "--priority", fmt.Sprintf("%d", opts.Priority))
+		}
+		if opts.Type != "" {
+			args = append(args, "--type", opts.Type)
+		}
+	}
+
+	cmd := exec.Command("bd", args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("creating bead: %s: %w", string(output), err)
+	}
+
+	// Parse the created bead ID from output
+	// Output format: "✓ Created issue: wt-xyz"
+	lines := strings.Split(string(output), "\n")
+	for _, line := range lines {
+		if strings.Contains(line, "Created issue:") {
+			parts := strings.Split(line, ":")
+			if len(parts) >= 2 {
+				return strings.TrimSpace(parts[len(parts)-1]), nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("could not parse created bead ID from: %s", string(output))
+}
+
+// UpdateDescription updates a bead's description
+func UpdateDescription(beadID, description string) error {
+	cmd := exec.Command("bd", "update", beadID, "--description", description)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("updating bead description: %s: %w", string(output), err)
+	}
+	return nil
+}
+
+// ShowFull returns full bead info including description
+type BeadInfoFull struct {
+	ID          string `json:"id"`
+	Title       string `json:"title"`
+	Status      string `json:"status"`
+	Project     string `json:"project"`
+	Description string `json:"description"`
+	Priority    int    `json:"priority"`
+	IssueType   string `json:"issue_type"`
+}
+
+// ShowFull returns full bead information including description
+func ShowFull(beadID string) (*BeadInfoFull, error) {
+	cmd := exec.Command("bd", "show", beadID, "--json")
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("showing bead: %w", err)
+	}
+
+	var info BeadInfoFull
+	if err := json.Unmarshal(output, &info); err != nil {
+		return nil, fmt.Errorf("parsing bead info: %w", err)
+	}
+
+	return &info, nil
+}
