@@ -1,2 +1,58 @@
-# wt
-Minimal agentic coding orchestrator: beads + worktrees + tmux
+# wt - Worktree Session Manager
+
+Minimal agentic coding orchestrator built on:
+- **Beads** for task tracking
+- **Git worktrees** for isolation
+- **Tmux** for session persistence
+- **Claude** (or other agents) for execution
+
+## Philosophy
+
+One bead = one session = one worktree. Sessions persist until you explicitly close them. No auto-compaction, no handoff complexity.
+
+## Status
+
+**Work in progress.** See [SPEC.md](SPEC.md) for the full specification.
+
+## Quick Overview
+
+```bash
+# In your hub (Claude session), groom beads
+bd ready                    # See available work
+
+# Spawn a worker session
+wt new supabyoi-pks         # Creates worktree + tmux session + launches Claude
+# → "Spawned session 'toast' for bead supabyoi-pks"
+
+# List active sessions
+wt
+# ┌─ Active Sessions ─────────────────────────────────────────┐
+# │ 🟢 toast    supabyoi-pks   Working   Auto-harden VM      │
+# │ 🟡 shadow   supabyoi-g4a   Idle      Encrypt secrets     │
+# └───────────────────────────────────────────────────────────┘
+
+# Switch to a session (lands you in Claude conversation)
+wt toast
+
+# Complete work
+wt done                     # Commits, pushes, creates PR
+wt close toast              # Cleanup session + worktree
+```
+
+## Installation
+
+Coming soon.
+
+```bash
+go install github.com/badri/wt@latest
+```
+
+## Related Projects
+
+- [beads](https://github.com/steveyegge/beads) - Git-native issue tracking
+- [gastown](https://github.com/steveyegge/gastown) - Multi-agent workspace manager (more complex)
+- [vibekanban](https://github.com/BloopAI/vibe-kanban) - AI agent orchestration with visual UI
+
+## License
+
+MIT
