@@ -301,12 +301,14 @@ func cmdNew(cfg *config.Config, args []string) error {
 	fmt.Printf("  Branch:   %s\n", beadID)
 
 	// Send initial work prompt to Claude after a short delay
-	go func() {
-		time.Sleep(2 * time.Second) // Wait for Claude to start
-		prompt := buildInitialPrompt(beadID, beadInfo.Title, proj)
-		sendPromptCmd := exec.Command("tmux", "send-keys", "-t", sessionName, prompt, "Enter")
-		sendPromptCmd.Run()
-	}()
+	// Run synchronously to ensure prompt is sent before wt exits
+	fmt.Println("Sending initial prompt to worker...")
+	time.Sleep(2 * time.Second) // Wait for Claude to start
+	prompt := buildInitialPrompt(beadID, beadInfo.Title, proj)
+	sendPromptCmd := exec.Command("tmux", "send-keys", "-t", sessionName, prompt, "Enter")
+	if err := sendPromptCmd.Run(); err != nil {
+		fmt.Printf("Warning: could not send initial prompt: %v\n", err)
+	}
 
 	// Determine if we should switch
 	// Default to no-switch if running from hub (WT_HUB=1), unless --switch is used
