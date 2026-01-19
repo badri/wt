@@ -1,0 +1,281 @@
+// Package hub provides dedicated orchestration session management.
+// The hub session is a persistent tmux session for managing worker sessions.
+package hub
+
+import (
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+
+	"github.com/badri/wt/internal/config"
+)
+
+const (
+	// HubSessionName is the name of the hub tmux session.
+	HubSessionName = "hub"
+)
+
+// Options configures hub behavior.
+type Options struct {
+	Detach bool // Detach from hub (return to previous session)
+	Status bool // Show hub status without attaching
+}
+
+// Status contains hub session status information.
+type Status struct {
+	Exists       bool   // Whether hub session exists
+	Attached     bool   // Whether we're currently attached to hub
+	WorkingDir   string // Hub's working directory
+	WindowCount  int    // Number of tmux windows
+	CreatedAt    string // Session creation time (if available)
+	CurrentPane  string // Current pane info
+}
+
+// Run executes the hub command based on options.
+func Run(cfg *config.Config, opts *Options) error {
+	if opts.Status {
+		return showStatus()
+	}
+
+	if opts.Detach {
+		return detach()
+	}
+
+	// Default: create or attach to hub
+	return createOrAttach(cfg)
+}
+
+// showStatus displays hub status without attaching.
+func showStatus() error {
+	status := GetStatus()
+
+	if !status.Exists {
+		fmt.Println("Hub session does not exist.")
+		fmt.Println("\nCreate with: wt hub")
+		return nil
+	}
+
+	fmt.Println("┌─ Hub Status ──────────────────────────────────────────────────────────┐")
+	fmt.Println("│                                                                       │")
+
+	statusStr := "exists (detached)"
+	if status.Attached {
+		statusStr = "exists (attached)"
+	}
+	fmt.Printf("│  Status:      %-55s │\n", statusStr)
+	fmt.Printf("│  Working Dir: %-55s │\n", truncate(status.WorkingDir, 55))
+	fmt.Printf("│  Windows:     %-55d │\n", status.WindowCount)
+	if status.CurrentPane != "" {
+		fmt.Printf("│  Current:     %-55s │\n", truncate(status.CurrentPane, 55))
+	}
+	fmt.Println("│                                                                       │")
+	fmt.Println("└───────────────────────────────────────────────────────────────────────┘")
+
+	if !status.Attached {
+		fmt.Println("\nAttach with: wt hub")
+	}
+
+	return nil
+}
+
+// GetStatus returns the current hub status.
+func GetStatus() Status {
+	status := Status{}
+
+	// Check if hub session exists
+	cmd := exec.Command("tmux", "has-session", "-t", HubSessionName)
+	if err := cmd.Run(); err != nil {
+		return status
+	}
+	status.Exists = true
+
+	// Check if we're currently in the hub session
+	if tmuxEnv := os.Getenv("TMUX"); tmuxEnv != "" {
+		currentSession := getCurrentSession()
+		status.Attached = currentSession == HubSessionName
+	}
+
+	// Get working directory
+	cmd = exec.Command("tmux", "display-message", "-t", HubSessionName, "-p", "#{pane_current_path}")
+	if output, err := cmd.Output(); err == nil {
+		status.WorkingDir = strings.TrimSpace(string(output))
+	}
+
+	// Get window count
+	cmd = exec.Command("tmux", "list-windows", "-t", HubSessionName, "-F", "#{window_id}")
+	if output, err := cmd.Output(); err == nil {
+		lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+		status.WindowCount = len(lines)
+	}
+
+	// Get current pane info
+	cmd = exec.Command("tmux", "display-message", "-t", HubSessionName, "-p", "#{pane_current_command}")
+	if output, err := cmd.Output(); err == nil {
+		status.CurrentPane = strings.TrimSpace(string(output))
+	}
+
+	return status
+}
+
+// createOrAttach creates a new hub session or attaches to existing one.
+func createOrAttach(cfg *config.Config) error {
+	if Exists() {
+		// Hub exists - attach to it
+		return attach()
+	}
+
+	// Create new hub session
+	return create(cfg)
+}
+
+// create creates a new hub tmux session.
+func create(cfg *config.Config) error {
+	// Use home directory as working directory
+	homeDir := os.Getenv("HOME")
+	if homeDir == "" {
+		homeDir = "/"
+	}
+
+	// Create detached tmux session
+	cmd := exec.Command("tmux", "new-session",
+		"-d",                 // detached
+		"-s", HubSessionName, // session name
+		"-c", homeDir,        // working directory
+	)
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("creating hub session: %w", err)
+	}
+
+	// Set a marker environment variable to identify hub session
+	setEnvCmd := exec.Command("tmux", "set-environment", "-t", HubSessionName, "WT_HUB", "1")
+	_ = setEnvCmd.Run() // Non-fatal if this fails
+
+	// Get editor command from config
+	editorCmd := cfg.EditorCmd
+	if editorCmd != "" {
+		// Send the editor command to start
+		sendCmd := exec.Command("tmux", "send-keys", "-t", HubSessionName, editorCmd, "Enter")
+		if err := sendCmd.Run(); err != nil {
+			return fmt.Errorf("starting editor in hub: %w", err)
+		}
+	}
+
+	fmt.Printf("Created hub session.\n")
+	fmt.Printf("  Working directory: %s\n", homeDir)
+
+	// Attach to the new session
+	return attach()
+}
+
+// attach attaches to the hub session.
+func attach() error {
+	// Check if we're inside tmux
+	if os.Getenv("TMUX") != "" {
+		// Switch to the hub session
+		cmd := exec.Command("tmux", "switch-client", "-t", HubSessionName)
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		return cmd.Run()
+	}
+
+	// Attach to the session
+	cmd := exec.Command("tmux", "attach-session", "-t", HubSessionName)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+// detach detaches from hub and returns to previous session.
+func detach() error {
+	// Check if we're in tmux
+	if os.Getenv("TMUX") == "" {
+		return fmt.Errorf("not in a tmux session - cannot detach")
+	}
+
+	// Check if we're in the hub session
+	currentSession := getCurrentSession()
+	if currentSession != HubSessionName {
+		return fmt.Errorf("not in hub session (current: %s)", currentSession)
+	}
+
+	// Get the last session to switch to
+	lastSession := getLastSession()
+	if lastSession == "" || lastSession == HubSessionName {
+		// No previous session, just detach
+		fmt.Println("No previous session to return to. Detaching...")
+		cmd := exec.Command("tmux", "detach-client")
+		return cmd.Run()
+	}
+
+	// Switch to last session
+	fmt.Printf("Returning to session: %s\n", lastSession)
+	cmd := exec.Command("tmux", "switch-client", "-t", lastSession)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+// Exists returns true if the hub session exists.
+func Exists() bool {
+	cmd := exec.Command("tmux", "has-session", "-t", HubSessionName)
+	return cmd.Run() == nil
+}
+
+// IsInHub returns true if we're currently in the hub session.
+func IsInHub() bool {
+	if os.Getenv("TMUX") == "" {
+		return false
+	}
+	return getCurrentSession() == HubSessionName
+}
+
+// Kill terminates the hub session.
+func Kill() error {
+	if !Exists() {
+		return fmt.Errorf("hub session does not exist")
+	}
+
+	cmd := exec.Command("tmux", "kill-session", "-t", HubSessionName)
+	return cmd.Run()
+}
+
+// getCurrentSession returns the name of the current tmux session.
+func getCurrentSession() string {
+	cmd := exec.Command("tmux", "display-message", "-p", "#{session_name}")
+	output, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(output))
+}
+
+// getLastSession returns the name of the previously active session.
+func getLastSession() string {
+	// tmux stores last session in the session stack
+	// We can get it via the client's last session
+	cmd := exec.Command("tmux", "display-message", "-p", "#{client_last_session}")
+	output, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(output))
+}
+
+// GetHubDir returns the path to hub-specific state directory.
+func GetHubDir(cfg *config.Config) string {
+	return filepath.Join(cfg.ConfigDir(), "hub")
+}
+
+// truncate truncates a string to max length with ellipsis.
+func truncate(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max-3] + "..."
+}

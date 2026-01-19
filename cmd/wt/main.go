@@ -17,6 +17,7 @@ import (
 	"github.com/badri/wt/internal/doctor"
 	"github.com/badri/wt/internal/events"
 	"github.com/badri/wt/internal/handoff"
+	"github.com/badri/wt/internal/hub"
 	"github.com/badri/wt/internal/merge"
 	"github.com/badri/wt/internal/monitor"
 	"github.com/badri/wt/internal/namepool"
@@ -125,6 +126,8 @@ func run() error {
 		return cmdHandoff(cfg, args[1:])
 	case "prime":
 		return cmdPrime(cfg, args[1:])
+	case "hub":
+		return cmdHub(cfg, args[1:])
 	default:
 		// Assume it's a session name or bead ID to switch to
 		return cmdSwitch(cfg, args[0])
@@ -1862,7 +1865,7 @@ _wt_completions() {
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
 
-    commands="list new kill close done status abandon watch seance projects ready create beads project auto events doctor pick keys completion handoff prime"
+    commands="list new kill close done status abandon watch seance projects ready create beads project auto events doctor pick keys completion handoff prime hub"
 
     case "${prev}" in
         wt)
@@ -1901,6 +1904,10 @@ _wt_completions() {
             ;;
         completion)
             COMPREPLY=( $(compgen -W "bash zsh fish" -- "${cur}") )
+            return 0
+            ;;
+        hub)
+            COMPREPLY=( $(compgen -W "--status --detach" -- "${cur}") )
             return 0
             ;;
         *)
@@ -1943,6 +1950,7 @@ _wt() {
         'completion:Generate shell completions'
         'handoff:Handoff to fresh Claude instance'
         'prime:Inject startup context'
+        'hub:Create or attach to hub session'
     )
 
     _arguments -C \
@@ -1985,6 +1993,9 @@ _wt() {
                 completion)
                     _describe 'shell' '(bash zsh fish)'
                     ;;
+                hub)
+                    _describe 'flag' '(--status --detach)'
+                    ;;
             esac
             ;;
     esac
@@ -2022,6 +2033,7 @@ complete -c wt -n __fish_use_subcommand -a keys -d 'Output tmux keybindings'
 complete -c wt -n __fish_use_subcommand -a completion -d 'Generate shell completions'
 complete -c wt -n __fish_use_subcommand -a handoff -d 'Handoff to fresh Claude instance'
 complete -c wt -n __fish_use_subcommand -a prime -d 'Inject startup context'
+complete -c wt -n __fish_use_subcommand -a hub -d 'Create or attach to hub session'
 
 # Session names for bare wt command
 complete -c wt -n __fish_use_subcommand -a "(wt list 2>/dev/null | grep -E '^\│\s+[🟢🟡🔴]' | awk '{print \$2}')" -d 'Switch to session'
@@ -2043,6 +2055,10 @@ complete -c wt -n '__fish_seen_subcommand_from create beads ready' -a "(wt proje
 
 # Completions for 'completion' - shell types
 complete -c wt -n '__fish_seen_subcommand_from completion' -a 'bash zsh fish' -d 'Shell'
+
+# Completions for 'hub' - flags
+complete -c wt -n '__fish_seen_subcommand_from hub' -l status -s s -d 'Show hub status'
+complete -c wt -n '__fish_seen_subcommand_from hub' -l detach -s d -d 'Detach from hub'
 `
 
 // cmdVersion prints version information
@@ -2125,6 +2141,25 @@ func parsePrimeFlags(args []string) *handoff.PrimeOptions {
 			opts.Quiet = true
 		case "--no-bd-prime":
 			opts.NoBdPrime = true
+		}
+	}
+	return opts
+}
+
+// cmdHub creates or attaches to the dedicated hub session
+func cmdHub(cfg *config.Config, args []string) error {
+	opts := parseHubFlags(args)
+	return hub.Run(cfg, opts)
+}
+
+func parseHubFlags(args []string) *hub.Options {
+	opts := &hub.Options{}
+	for _, arg := range args {
+		switch arg {
+		case "-d", "--detach":
+			opts.Detach = true
+		case "-s", "--status":
+			opts.Status = true
 		}
 	}
 	return opts

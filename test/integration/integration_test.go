@@ -15,6 +15,7 @@ import (
 	"github.com/badri/wt/internal/config"
 	"github.com/badri/wt/internal/events"
 	"github.com/badri/wt/internal/handoff"
+	"github.com/badri/wt/internal/hub"
 	"github.com/badri/wt/internal/merge"
 	"github.com/badri/wt/internal/namepool"
 	"github.com/badri/wt/internal/project"
@@ -2333,4 +2334,144 @@ func TestIntegration_DirectMergeWorkflow(t *testing.T) {
 	// but we've tested all the helper functions it uses.
 
 	t.Log("Direct merge workflow integration test completed successfully")
+}
+
+// TestIntegration_HubCreateAndStatus tests hub creation and status commands.
+func TestIntegration_HubCreateAndStatus(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not available, skipping integration test")
+	}
+
+	// Clean up any existing hub session first
+	if hub.Exists() {
+		t.Log("Cleaning up existing hub session")
+		_ = hub.Kill()
+	}
+
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "config")
+
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	configJSON := `{"worktree_root": "` + filepath.Join(tmpDir, "worktrees") + `"}`
+	if err := os.WriteFile(filepath.Join(configDir, "config.json"), []byte(configJSON), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := config.LoadFromDir(configDir)
+	if err != nil {
+		t.Fatalf("failed to load config: %v", err)
+	}
+
+	// Test: Hub should not exist initially (after cleanup)
+	if hub.Exists() {
+		t.Error("hub should not exist after cleanup")
+	}
+
+	// Test: GetStatus when hub doesn't exist
+	status := hub.GetStatus()
+	if status.Exists {
+		t.Error("status.Exists should be false when hub doesn't exist")
+	}
+
+	// Test: Create hub manually via tmux (simulating what hub.create does)
+	homeDir := os.Getenv("HOME")
+	cmd := exec.Command("tmux", "new-session",
+		"-d",
+		"-s", hub.HubSessionName,
+		"-c", homeDir,
+	)
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("failed to create hub session: %v", err)
+	}
+
+	// Cleanup: ensure we kill hub at end of test
+	defer func() {
+		_ = hub.Kill()
+	}()
+
+	// Test: Hub should now exist
+	if !hub.Exists() {
+		t.Error("hub should exist after creation")
+	}
+
+	// Test: GetStatus when hub exists
+	status = hub.GetStatus()
+	if !status.Exists {
+		t.Error("status.Exists should be true after creation")
+	}
+	if status.WorkingDir != homeDir {
+		t.Logf("hub working dir: %s (expected ~%s)", status.WorkingDir, homeDir)
+	}
+	if status.WindowCount < 1 {
+		t.Errorf("expected at least 1 window, got %d", status.WindowCount)
+	}
+
+	// Test: GetHubDir
+	hubDir := hub.GetHubDir(cfg)
+	expectedDir := configDir + "/hub"
+	if hubDir != expectedDir {
+		t.Errorf("expected hub dir %q, got %q", expectedDir, hubDir)
+	}
+
+	// Test: IsInHub when not attached (since we're running tests)
+	if hub.IsInHub() {
+		t.Log("IsInHub returned true - test is running inside hub")
+	} else {
+		t.Log("IsInHub returned false - test is running outside hub")
+	}
+
+	// Test: Kill hub
+	if err := hub.Kill(); err != nil {
+		t.Fatalf("failed to kill hub: %v", err)
+	}
+
+	// Verify hub is gone
+	if hub.Exists() {
+		t.Error("hub should not exist after kill")
+	}
+
+	t.Log("Hub create and status integration test completed successfully")
+}
+
+// TestIntegration_HubRunStatusOption tests the hub.Run function with status option.
+func TestIntegration_HubRunStatusOption(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not available, skipping integration test")
+	}
+
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "config")
+
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	configJSON := `{"worktree_root": "` + filepath.Join(tmpDir, "worktrees") + `"}`
+	if err := os.WriteFile(filepath.Join(configDir, "config.json"), []byte(configJSON), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := config.LoadFromDir(configDir)
+	if err != nil {
+		t.Fatalf("failed to load config: %v", err)
+	}
+
+	// Test Run with Status option - should not error even if hub doesn't exist
+	opts := &hub.Options{Status: true}
+	err = hub.Run(cfg, opts)
+	if err != nil {
+		t.Errorf("unexpected error with status option: %v", err)
+	}
+
+	t.Log("Hub Run status option integration test completed successfully")
+}
+
+// TestIntegration_HubConstants tests hub package constants.
+func TestIntegration_HubConstants(t *testing.T) {
+	if hub.HubSessionName != "hub" {
+		t.Errorf("expected HubSessionName to be 'hub', got %q", hub.HubSessionName)
+	}
+
+	t.Log("Hub constants integration test completed successfully")
 }

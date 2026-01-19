@@ -642,8 +642,69 @@ Workers inherit `BEADS_DIR` from the project, so bd commands inside workers oper
 | `wt events --tail` | Follow events in real-time |
 | `wt events --new --clear` | Get new events (for hooks) |
 | `wt doctor` | Diagnose setup issues |
+| `wt hub` | Create or attach to hub session |
+| `wt hub --status` | Show hub status without attaching |
+| `wt hub --detach` | Detach from hub (return to previous) |
 | `wt handoff` | Handoff hub to fresh Claude instance |
 | `wt prime` | Inject startup context (for hooks) |
+
+---
+
+## Hub Session: Dedicated Orchestration
+
+The hub is a dedicated tmux session for orchestrating worker sessions. Unlike worker sessions, the hub has no worktree and is not tied to any specific bead.
+
+### Creating/Attaching to Hub
+
+```bash
+wt hub                      # Create hub or attach if exists
+wt hub --status             # Show hub status without attaching
+wt hub --detach             # Detach from hub, return to previous session
+```
+
+### Hub Characteristics
+
+- **Session name**: Always "hub"
+- **Working directory**: Home directory (~)
+- **No worktree**: Hub doesn't have code isolation
+- **No BEADS_DIR**: Uses bd's project detection
+- **Persistent**: Survives across Claude instances via handoff
+
+### When to Use Hub
+
+- **Central orchestration**: Manage multiple worker sessions from one place
+- **Cross-project work**: Work on beads from different projects
+- **Monitoring**: Watch workers, check events, review progress
+
+### Hub Workflow
+
+```bash
+# Start or attach to hub
+wt hub
+
+# From hub, spawn workers
+wt new project-abc --no-switch
+wt new project-xyz --no-switch
+
+# Monitor workers
+wt watch
+
+# Switch to a worker to check on it
+wt toast              # Ctrl-b d to detach back to hub
+
+# When done, detach from hub
+wt hub --detach       # Returns to previous session
+```
+
+### Hub vs Worker Sessions
+
+| Aspect | Hub | Worker |
+|--------|-----|--------|
+| Session name | "hub" | Theme-based (toast, shadow, etc.) |
+| Working dir | ~ | Worktree path |
+| Worktree | None | Yes, isolated |
+| BEADS_DIR | Not set | Set to project's .beads |
+| Purpose | Orchestration | Actual coding work |
 
 ---
 
