@@ -3,6 +3,7 @@
 package integration
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/badri/wt/internal/auto"
 	"github.com/badri/wt/internal/config"
 	"github.com/badri/wt/internal/events"
 	"github.com/badri/wt/internal/handoff"
@@ -1255,4 +1257,1080 @@ func TestIntegration_QuickPrime(t *testing.T) {
 	}
 
 	t.Log("QuickPrime integration test completed successfully")
+}
+
+// TestIntegration_StatusCommand tests the wt status command functionality.
+// This tests the underlying logic used by cmdStatus without invoking the actual CLI.
+func TestIntegration_StatusCommand(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not available, skipping integration test")
+	}
+
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "config")
+	worktreeRoot := filepath.Join(tmpDir, "worktrees")
+	repoDir := filepath.Join(tmpDir, "repo")
+
+	// Initialize git repo
+	if err := initGitRepo(repoDir); err != nil {
+		t.Fatalf("failed to init git repo: %v", err)
+	}
+
+	// Setup config
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	configJSON := `{"worktree_root": "` + worktreeRoot + `"}`
+	if err := os.WriteFile(filepath.Join(configDir, "config.json"), []byte(configJSON), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := config.LoadFromDir(configDir)
+	if err != nil {
+		t.Fatalf("failed to load config: %v", err)
+	}
+
+	pool, err := namepool.Load(cfg)
+	if err != nil {
+		t.Fatalf("failed to load namepool: %v", err)
+	}
+
+	state, err := session.LoadState(cfg)
+	if err != nil {
+		t.Fatalf("failed to load state: %v", err)
+	}
+
+	// Allocate a session name
+	sessionName, err := pool.Allocate(state.UsedNames())
+	if err != nil {
+		t.Fatalf("failed to allocate name: %v", err)
+	}
+
+	// Create worktree
+	worktreePath := cfg.WorktreePath(sessionName)
+	branchName := "test-status-branch"
+	if err := worktree.Create(repoDir, worktreePath, branchName); err != nil {
+		t.Fatalf("failed to create worktree: %v", err)
+	}
+
+	// Create tmux session
+	if err := tmux.NewSession(sessionName, worktreePath, repoDir+"/.beads", "", nil); err != nil {
+		t.Fatalf("failed to create tmux session: %v", err)
+	}
+
+	// Save session state with additional metadata
+	state.Sessions[sessionName] = &session.Session{
+		Bead:       "test-status-bead",
+		Project:    "testproj",
+		Worktree:   worktreePath,
+		Branch:     branchName,
+		PortOffset: 1000,
+		Status:     "working",
+	}
+	if err := state.Save(); err != nil {
+		t.Fatalf("failed to save state: %v", err)
+	}
+
+	// Test: Verify session can be looked up by worktree path (as cmdStatus does)
+	var foundSession string
+	var foundSess *session.Session
+	for name, s := range state.Sessions {
+		if s.Worktree == worktreePath {
+			foundSession = name
+			foundSess = s
+			break
+		}
+	}
+
+	if foundSession == "" {
+		t.Error("expected to find session by worktree path")
+	}
+	if foundSess == nil {
+		t.Error("expected session object to be non-nil")
+	}
+	if foundSess.Bead != "test-status-bead" {
+		t.Errorf("expected bead 'test-status-bead', got %q", foundSess.Bead)
+	}
+	if foundSess.PortOffset != 1000 {
+		t.Errorf("expected port_offset 1000, got %d", foundSess.PortOffset)
+	}
+
+	// Test: Check uncommitted changes (should be clean)
+	hasChanges, err := merge.HasUncommittedChanges(worktreePath)
+	if err != nil {
+		t.Fatalf("HasUncommittedChanges failed: %v", err)
+	}
+	if hasChanges {
+		t.Error("expected no uncommitted changes in fresh worktree")
+	}
+
+	// Test: Get current branch
+	branch, err := merge.GetCurrentBranch(worktreePath)
+	if err != nil {
+		t.Fatalf("GetCurrentBranch failed: %v", err)
+	}
+	if branch != branchName {
+		t.Errorf("expected branch %q, got %q", branchName, branch)
+	}
+
+	// Test: Add a file and verify uncommitted changes
+	testFile := filepath.Join(worktreePath, "status-test.txt")
+	if err := os.WriteFile(testFile, []byte("test content"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	hasChanges, err = merge.HasUncommittedChanges(worktreePath)
+	if err != nil {
+		t.Fatalf("HasUncommittedChanges failed: %v", err)
+	}
+	if !hasChanges {
+		t.Error("expected uncommitted changes after creating file")
+	}
+
+	// Cleanup
+	_ = tmux.Kill(sessionName)
+	_ = worktree.Remove(worktreePath)
+
+	t.Log("Status command integration test completed successfully")
+}
+
+// TestIntegration_SwitchCommand tests switching between sessions.
+func TestIntegration_SwitchCommand(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not available, skipping integration test")
+	}
+
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "config")
+	worktreeRoot := filepath.Join(tmpDir, "worktrees")
+	repoDir := filepath.Join(tmpDir, "repo")
+
+	// Initialize git repo
+	if err := initGitRepo(repoDir); err != nil {
+		t.Fatalf("failed to init git repo: %v", err)
+	}
+
+	// Setup config
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	configJSON := `{"worktree_root": "` + worktreeRoot + `"}`
+	if err := os.WriteFile(filepath.Join(configDir, "config.json"), []byte(configJSON), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := config.LoadFromDir(configDir)
+	if err != nil {
+		t.Fatalf("failed to load config: %v", err)
+	}
+
+	state, err := session.LoadState(cfg)
+	if err != nil {
+		t.Fatalf("failed to load state: %v", err)
+	}
+
+	// Create two sessions
+	session1 := "switch-test-alpha"
+	session2 := "switch-test-beta"
+	bead1 := "test-bead-alpha"
+	bead2 := "test-bead-beta"
+
+	for _, sessInfo := range []struct {
+		name string
+		bead string
+	}{
+		{session1, bead1},
+		{session2, bead2},
+	} {
+		worktreePath := cfg.WorktreePath(sessInfo.name)
+		branchName := "feature-" + sessInfo.name
+
+		if err := worktree.Create(repoDir, worktreePath, branchName); err != nil {
+			t.Fatalf("failed to create worktree for %s: %v", sessInfo.name, err)
+		}
+
+		if err := tmux.NewSession(sessInfo.name, worktreePath, repoDir+"/.beads", "", nil); err != nil {
+			t.Fatalf("failed to create tmux session for %s: %v", sessInfo.name, err)
+		}
+
+		state.Sessions[sessInfo.name] = &session.Session{
+			Bead:     sessInfo.bead,
+			Project:  "testproj",
+			Worktree: worktreePath,
+			Branch:   branchName,
+			Status:   "working",
+		}
+	}
+
+	if err := state.Save(); err != nil {
+		t.Fatalf("failed to save state: %v", err)
+	}
+
+	// Test: Find session by exact name
+	_, exists := state.Sessions[session1]
+	if !exists {
+		t.Errorf("expected to find session %s by name", session1)
+	}
+
+	_, exists = state.Sessions[session2]
+	if !exists {
+		t.Errorf("expected to find session %s by name", session2)
+	}
+
+	// Test: Find session by bead ID
+	foundName, foundSess := state.FindByBead(bead1)
+	if foundName != session1 {
+		t.Errorf("expected to find session %s by bead %s, got %s", session1, bead1, foundName)
+	}
+	if foundSess == nil {
+		t.Errorf("expected session object for bead %s", bead1)
+	}
+
+	foundName, foundSess = state.FindByBead(bead2)
+	if foundName != session2 {
+		t.Errorf("expected to find session %s by bead %s, got %s", session2, bead2, foundName)
+	}
+
+	// Test: Verify both tmux sessions exist
+	if !tmux.SessionExists(session1) {
+		t.Errorf("tmux session %s should exist", session1)
+	}
+	if !tmux.SessionExists(session2) {
+		t.Errorf("tmux session %s should exist", session2)
+	}
+
+	// Test: Find non-existent session
+	foundName, foundSess = state.FindByBead("non-existent-bead")
+	if foundName != "" || foundSess != nil {
+		t.Error("expected no session for non-existent bead")
+	}
+
+	// Cleanup
+	for _, sessName := range []string{session1, session2} {
+		_ = tmux.Kill(sessName)
+		worktreePath := cfg.WorktreePath(sessName)
+		_ = worktree.Remove(worktreePath)
+	}
+
+	t.Log("Switch command integration test completed successfully")
+}
+
+// TestIntegration_DoctorChecks tests the doctor diagnostic checks.
+func TestIntegration_DoctorChecks(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "config")
+	worktreeRoot := filepath.Join(tmpDir, "worktrees")
+
+	// Setup config
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	configJSON := `{"worktree_root": "` + worktreeRoot + `"}`
+	if err := os.WriteFile(filepath.Join(configDir, "config.json"), []byte(configJSON), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "sessions.json"), []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := config.LoadFromDir(configDir)
+	if err != nil {
+		t.Fatalf("failed to load config: %v", err)
+	}
+
+	// Test: Check tmux is available
+	_, tmuxErr := exec.LookPath("tmux")
+	hasTmuxCmd := tmuxErr == nil
+
+	// Test: Check git is available
+	_, gitErr := exec.LookPath("git")
+	hasGit := gitErr == nil
+
+	if !hasGit {
+		t.Skip("git not available, skipping doctor checks")
+	}
+
+	// Test: Worktree root should be creatable
+	if err := os.MkdirAll(worktreeRoot, 0755); err != nil {
+		t.Fatalf("failed to create worktree root: %v", err)
+	}
+
+	// Test: Worktree root should be writable
+	testFile := filepath.Join(worktreeRoot, ".test-write")
+	if err := os.WriteFile(testFile, []byte("test"), 0644); err != nil {
+		t.Fatalf("worktree root should be writable: %v", err)
+	}
+	os.Remove(testFile)
+
+	// Test: Config should be loadable
+	if cfg.ConfigDir() == "" {
+		t.Error("expected config dir to be set")
+	}
+
+	// Test: Session state should be loadable
+	state, err := session.LoadState(cfg)
+	if err != nil {
+		t.Fatalf("failed to load session state: %v", err)
+	}
+	if state == nil {
+		t.Error("expected session state to be non-nil")
+	}
+
+	t.Logf("Doctor checks: tmux=%v, git=%v", hasTmuxCmd, hasGit)
+	t.Log("Doctor checks integration test completed successfully")
+}
+
+// TestIntegration_ErrorPaths tests various error conditions.
+func TestIntegration_ErrorPaths(t *testing.T) {
+	t.Run("InvalidConfig", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configDir := filepath.Join(tmpDir, "config")
+
+		// Create invalid JSON config
+		if err := os.MkdirAll(configDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(configDir, "config.json"), []byte("{invalid json}"), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		// Loading config should fail
+		_, err := config.LoadFromDir(configDir)
+		if err == nil {
+			t.Error("expected error when loading invalid config")
+		}
+	})
+
+	t.Run("CorruptedSessionState", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configDir := filepath.Join(tmpDir, "config")
+		worktreeRoot := filepath.Join(tmpDir, "worktrees")
+
+		// Create valid config but corrupted sessions.json
+		if err := os.MkdirAll(configDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		configJSON := `{"worktree_root": "` + worktreeRoot + `"}`
+		if err := os.WriteFile(filepath.Join(configDir, "config.json"), []byte(configJSON), 0644); err != nil {
+			t.Fatal(err)
+		}
+		// Corrupted JSON
+		if err := os.WriteFile(filepath.Join(configDir, "sessions.json"), []byte("{corrupted"), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		cfg, err := config.LoadFromDir(configDir)
+		if err != nil {
+			t.Fatalf("config should load: %v", err)
+		}
+
+		// Loading session state should fail
+		_, err = session.LoadState(cfg)
+		if err == nil {
+			t.Error("expected error when loading corrupted session state")
+		}
+	})
+
+	t.Run("SessionAlreadyExistsForBead", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configDir := filepath.Join(tmpDir, "config")
+		worktreeRoot := filepath.Join(tmpDir, "worktrees")
+
+		if err := os.MkdirAll(configDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		configJSON := `{"worktree_root": "` + worktreeRoot + `"}`
+		if err := os.WriteFile(filepath.Join(configDir, "config.json"), []byte(configJSON), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(configDir, "sessions.json"), []byte("{}"), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		cfg, err := config.LoadFromDir(configDir)
+		if err != nil {
+			t.Fatalf("failed to load config: %v", err)
+		}
+
+		state, err := session.LoadState(cfg)
+		if err != nil {
+			t.Fatalf("failed to load state: %v", err)
+		}
+
+		// Add a session for a bead
+		beadID := "test-duplicate-bead"
+		state.Sessions["existing-session"] = &session.Session{
+			Bead:    beadID,
+			Project: "testproj",
+			Status:  "working",
+		}
+		if err := state.Save(); err != nil {
+			t.Fatalf("failed to save state: %v", err)
+		}
+
+		// Check if session exists for bead (as cmdNew would do)
+		for name, sess := range state.Sessions {
+			if sess.Bead == beadID {
+				// This is the expected behavior
+				t.Logf("Found existing session '%s' for bead %s", name, beadID)
+				break
+			}
+		}
+	})
+
+	t.Run("ProjectWithActiveSessions", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configDir := filepath.Join(tmpDir, "config")
+		worktreeRoot := filepath.Join(tmpDir, "worktrees")
+		repoDir := filepath.Join(tmpDir, "repo")
+
+		// Initialize git repo
+		if err := initGitRepo(repoDir); err != nil {
+			t.Fatalf("failed to init git repo: %v", err)
+		}
+
+		if err := os.MkdirAll(configDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		configJSON := `{"worktree_root": "` + worktreeRoot + `"}`
+		if err := os.WriteFile(filepath.Join(configDir, "config.json"), []byte(configJSON), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(configDir, "sessions.json"), []byte("{}"), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		cfg, err := config.LoadFromDir(configDir)
+		if err != nil {
+			t.Fatalf("failed to load config: %v", err)
+		}
+
+		// Add a project
+		mgr := project.NewManager(cfg)
+		proj, err := mgr.Add("testproj", repoDir)
+		if err != nil {
+			t.Fatalf("failed to add project: %v", err)
+		}
+
+		// Add an active session for this project
+		state, _ := session.LoadState(cfg)
+		state.Sessions["active-session"] = &session.Session{
+			Bead:    "test-bead",
+			Project: proj.Name,
+			Status:  "working",
+		}
+		if err := state.Save(); err != nil {
+			t.Fatalf("failed to save state: %v", err)
+		}
+
+		// Check for active sessions (as cmdProjectRemove does)
+		var activeSessions []string
+		for sessName, sess := range state.Sessions {
+			if sess.Project == proj.Name {
+				activeSessions = append(activeSessions, sessName)
+			}
+		}
+
+		if len(activeSessions) == 0 {
+			t.Error("expected to find active sessions for project")
+		}
+
+		// This should prevent deletion
+		t.Logf("Project has %d active session(s): %v", len(activeSessions), activeSessions)
+
+		// Clean up: remove session and then project
+		delete(state.Sessions, "active-session")
+		state.Save()
+		mgr.Delete(proj.Name)
+	})
+
+	t.Run("WorktreeAlreadyExists", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		repoDir := filepath.Join(tmpDir, "repo")
+		worktreeDir := filepath.Join(tmpDir, "worktree")
+
+		if err := initGitRepo(repoDir); err != nil {
+			t.Fatalf("failed to init git repo: %v", err)
+		}
+
+		// Create first worktree
+		if err := worktree.Create(repoDir, worktreeDir, "feature-1"); err != nil {
+			t.Fatalf("failed to create worktree: %v", err)
+		}
+
+		// Try to create same worktree again (should fail)
+		err := worktree.Create(repoDir, worktreeDir, "feature-2")
+		if err == nil {
+			t.Error("expected error when creating worktree at existing path")
+		}
+
+		// Clean up
+		worktree.Remove(worktreeDir)
+	})
+}
+
+// TestIntegration_HookExecution tests on_create and on_close hooks.
+func TestIntegration_HookExecution(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "config")
+	worktreeRoot := filepath.Join(tmpDir, "worktrees")
+	repoDir := filepath.Join(tmpDir, "repo")
+
+	// Initialize git repo
+	if err := initGitRepo(repoDir); err != nil {
+		t.Fatalf("failed to init git repo: %v", err)
+	}
+
+	// Create test script that writes to a marker file
+	hookMarkerFile := filepath.Join(tmpDir, "hook-executed")
+
+	// Setup config
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	configJSON := `{"worktree_root": "` + worktreeRoot + `"}`
+	if err := os.WriteFile(filepath.Join(configDir, "config.json"), []byte(configJSON), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "sessions.json"), []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := config.LoadFromDir(configDir)
+	if err != nil {
+		t.Fatalf("failed to load config: %v", err)
+	}
+
+	// Add a project with hooks
+	mgr := project.NewManager(cfg)
+	proj, err := mgr.Add("hooktest", repoDir)
+	if err != nil {
+		t.Fatalf("failed to add project: %v", err)
+	}
+
+	// Configure hooks on the project
+	proj.Hooks = &project.Hooks{
+		OnCreate: []string{"touch " + hookMarkerFile + ".create"},
+		OnClose:  []string{"touch " + hookMarkerFile + ".close"},
+	}
+	if err := mgr.Save(proj); err != nil {
+		t.Fatalf("failed to save project with hooks: %v", err)
+	}
+
+	// Verify hooks are saved
+	reloadedProj, err := mgr.Get("hooktest")
+	if err != nil {
+		t.Fatalf("failed to reload project: %v", err)
+	}
+	if reloadedProj.Hooks == nil {
+		t.Error("expected hooks to be saved")
+	}
+	if len(reloadedProj.Hooks.OnCreate) != 1 {
+		t.Errorf("expected 1 on_create hook, got %d", len(reloadedProj.Hooks.OnCreate))
+	}
+	if len(reloadedProj.Hooks.OnClose) != 1 {
+		t.Errorf("expected 1 on_close hook, got %d", len(reloadedProj.Hooks.OnClose))
+	}
+
+	// Test: Run on_create hook manually (simulating what cmdNew does)
+	worktreePath := filepath.Join(worktreeRoot, "hook-test-worktree")
+	if err := os.MkdirAll(worktreePath, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := testenv.RunOnCreateHooks(reloadedProj, worktreePath, 0, ""); err != nil {
+		t.Fatalf("failed to run on_create hooks: %v", err)
+	}
+
+	// Verify on_create hook executed
+	if _, err := os.Stat(hookMarkerFile + ".create"); os.IsNotExist(err) {
+		t.Error("on_create hook marker file should exist")
+	}
+
+	// Test: Run on_close hook manually (simulating what cmdKill/cmdClose does)
+	if err := testenv.RunOnCloseHooks(reloadedProj, worktreePath, 0, ""); err != nil {
+		t.Fatalf("failed to run on_close hooks: %v", err)
+	}
+
+	// Verify on_close hook executed
+	if _, err := os.Stat(hookMarkerFile + ".close"); os.IsNotExist(err) {
+		t.Error("on_close hook marker file should exist")
+	}
+
+	// Clean up
+	mgr.Delete("hooktest")
+
+	t.Log("Hook execution integration test completed successfully")
+}
+
+// TestIntegration_CrossProjectSessions tests sessions across multiple projects.
+func TestIntegration_CrossProjectSessions(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not available, skipping integration test")
+	}
+
+	// Clean up any existing test sessions from previous runs
+	_ = tmux.Kill("cross-proj-session-1")
+	_ = tmux.Kill("cross-proj-session-2")
+
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "config")
+	worktreeRoot := filepath.Join(tmpDir, "worktrees")
+
+	// Create two separate repos for two projects
+	repo1 := filepath.Join(tmpDir, "repo1")
+	repo2 := filepath.Join(tmpDir, "repo2")
+
+	if err := initGitRepo(repo1); err != nil {
+		t.Fatalf("failed to init repo1: %v", err)
+	}
+	if err := initGitRepo(repo2); err != nil {
+		t.Fatalf("failed to init repo2: %v", err)
+	}
+
+	// Setup config
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	configJSON := `{"worktree_root": "` + worktreeRoot + `"}`
+	if err := os.WriteFile(filepath.Join(configDir, "config.json"), []byte(configJSON), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "sessions.json"), []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := config.LoadFromDir(configDir)
+	if err != nil {
+		t.Fatalf("failed to load config: %v", err)
+	}
+
+	// Add two projects
+	mgr := project.NewManager(cfg)
+	proj1, err := mgr.Add("project-alpha", repo1)
+	if err != nil {
+		t.Fatalf("failed to add project1: %v", err)
+	}
+	proj2, err := mgr.Add("project-beta", repo2)
+	if err != nil {
+		t.Fatalf("failed to add project2: %v", err)
+	}
+
+	// Create sessions for each project
+	state, err := session.LoadState(cfg)
+	if err != nil {
+		t.Fatalf("failed to load state: %v", err)
+	}
+
+	// Session for project 1
+	session1 := "cross-proj-session-1"
+	worktree1 := cfg.WorktreePath(session1)
+	if err := worktree.Create(repo1, worktree1, "feature-proj1"); err != nil {
+		t.Fatalf("failed to create worktree for project1: %v", err)
+	}
+	if err := tmux.NewSession(session1, worktree1, repo1+"/.beads", "", nil); err != nil {
+		t.Fatalf("failed to create tmux session for project1: %v", err)
+	}
+	state.Sessions[session1] = &session.Session{
+		Bead:    "project-alpha-abc",
+		Project: proj1.Name,
+		Status:  "working",
+	}
+
+	// Session for project 2
+	session2 := "cross-proj-session-2"
+	worktree2 := cfg.WorktreePath(session2)
+	if err := worktree.Create(repo2, worktree2, "feature-proj2"); err != nil {
+		t.Fatalf("failed to create worktree for project2: %v", err)
+	}
+	if err := tmux.NewSession(session2, worktree2, repo2+"/.beads", "", nil); err != nil {
+		t.Fatalf("failed to create tmux session for project2: %v", err)
+	}
+	state.Sessions[session2] = &session.Session{
+		Bead:    "project-beta-xyz",
+		Project: proj2.Name,
+		Status:  "working",
+	}
+
+	if err := state.Save(); err != nil {
+		t.Fatalf("failed to save state: %v", err)
+	}
+
+	// Test: Verify both sessions exist
+	if len(state.Sessions) != 2 {
+		t.Errorf("expected 2 sessions, got %d", len(state.Sessions))
+	}
+
+	// Test: Count sessions per project
+	sessionsByProject := make(map[string]int)
+	for _, sess := range state.Sessions {
+		sessionsByProject[sess.Project]++
+	}
+
+	if sessionsByProject[proj1.Name] != 1 {
+		t.Errorf("expected 1 session for project1, got %d", sessionsByProject[proj1.Name])
+	}
+	if sessionsByProject[proj2.Name] != 1 {
+		t.Errorf("expected 1 session for project2, got %d", sessionsByProject[proj2.Name])
+	}
+
+	// Test: Find by bead prefix (simulating project lookup)
+	foundProj, err := mgr.FindByBeadPrefix("project-alpha-abc")
+	if err != nil {
+		t.Fatalf("FindByBeadPrefix failed: %v", err)
+	}
+	if foundProj.Name != proj1.Name {
+		t.Errorf("expected project %s, got %s", proj1.Name, foundProj.Name)
+	}
+
+	// Clean up
+	for _, sessName := range []string{session1, session2} {
+		_ = tmux.Kill(sessName)
+		_ = worktree.Remove(cfg.WorktreePath(sessName))
+	}
+	_ = mgr.Delete(proj1.Name)
+	_ = mgr.Delete(proj2.Name)
+
+	t.Log("Cross-project sessions integration test completed successfully")
+}
+
+// TestIntegration_TestEnvSetupTeardown tests test environment setup and teardown.
+func TestIntegration_TestEnvSetupTeardown(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "config")
+	worktreeRoot := filepath.Join(tmpDir, "worktrees")
+	repoDir := filepath.Join(tmpDir, "repo")
+
+	// Initialize git repo
+	if err := initGitRepo(repoDir); err != nil {
+		t.Fatalf("failed to init git repo: %v", err)
+	}
+
+	// Marker files for setup/teardown
+	setupMarker := filepath.Join(tmpDir, "setup-ran")
+	teardownMarker := filepath.Join(tmpDir, "teardown-ran")
+	healthFile := filepath.Join(tmpDir, "healthy")
+
+	// Setup config
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	configJSON := `{"worktree_root": "` + worktreeRoot + `"}`
+	if err := os.WriteFile(filepath.Join(configDir, "config.json"), []byte(configJSON), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := config.LoadFromDir(configDir)
+	if err != nil {
+		t.Fatalf("failed to load config: %v", err)
+	}
+
+	// Add a project with test_env configuration
+	mgr := project.NewManager(cfg)
+	proj, err := mgr.Add("testenv-proj", repoDir)
+	if err != nil {
+		t.Fatalf("failed to add project: %v", err)
+	}
+
+	// Configure test environment
+	proj.TestEnv = &project.TestEnv{
+		Setup:       "touch " + setupMarker,
+		Teardown:    "touch " + teardownMarker,
+		HealthCheck: "test -f " + healthFile,
+		PortEnv:     "TEST_PORT",
+	}
+	if err := mgr.Save(proj); err != nil {
+		t.Fatalf("failed to save project: %v", err)
+	}
+
+	// Create a worktree path for testing
+	worktreePath := filepath.Join(worktreeRoot, "testenv-worktree")
+	if err := os.MkdirAll(worktreePath, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Test: Allocate port offset
+	portOffset := testenv.AllocatePortOffset(proj, nil)
+	if portOffset != testenv.DefaultPortBase {
+		t.Errorf("expected port offset %d, got %d", testenv.DefaultPortBase, portOffset)
+	}
+
+	// Test: Run setup
+	if err := testenv.RunSetup(proj, worktreePath, portOffset); err != nil {
+		t.Fatalf("RunSetup failed: %v", err)
+	}
+
+	// Verify setup marker exists
+	if _, err := os.Stat(setupMarker); os.IsNotExist(err) {
+		t.Error("setup marker should exist after RunSetup")
+	}
+
+	// Test: Health check should fail (file doesn't exist yet)
+	err = testenv.WaitForHealthy(proj, worktreePath, portOffset, 1*time.Second)
+	if err == nil {
+		t.Error("expected health check to fail when health file doesn't exist")
+	}
+
+	// Create health file and check again
+	if err := os.WriteFile(healthFile, []byte("ok"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	err = testenv.WaitForHealthy(proj, worktreePath, portOffset, 5*time.Second)
+	if err != nil {
+		t.Errorf("expected health check to pass: %v", err)
+	}
+
+	// Test: Run teardown
+	if err := testenv.RunTeardown(proj, worktreePath, portOffset); err != nil {
+		t.Fatalf("RunTeardown failed: %v", err)
+	}
+
+	// Verify teardown marker exists
+	if _, err := os.Stat(teardownMarker); os.IsNotExist(err) {
+		t.Error("teardown marker should exist after RunTeardown")
+	}
+
+	// Clean up
+	mgr.Delete(proj.Name)
+
+	t.Log("Test environment setup/teardown integration test completed successfully")
+}
+
+// TestIntegration_AutoModeComponents tests components of the auto mode workflow.
+func TestIntegration_AutoModeComponents(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "config")
+	worktreeRoot := filepath.Join(tmpDir, "worktrees")
+	logsDir := filepath.Join(configDir, "logs")
+
+	// Setup config
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(logsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	configJSON := `{"worktree_root": "` + worktreeRoot + `"}`
+	if err := os.WriteFile(filepath.Join(configDir, "config.json"), []byte(configJSON), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := config.LoadFromDir(configDir)
+	if err != nil {
+		t.Fatalf("failed to load config: %v", err)
+	}
+
+	// Test: Default auto config
+	autoCfg := auto.DefaultConfig()
+	if autoCfg.TimeoutMinutes != 30 {
+		t.Errorf("expected default timeout 30, got %d", autoCfg.TimeoutMinutes)
+	}
+	if autoCfg.Command == "" {
+		t.Error("expected default command to be set")
+	}
+	if autoCfg.PromptTemplate == "" {
+		t.Error("expected default prompt template to be set")
+	}
+
+	// Test: Logger creation
+	logger, err := auto.NewLogger(logsDir)
+	if err != nil {
+		t.Fatalf("failed to create logger: %v", err)
+	}
+	defer logger.Close()
+
+	// Test: Log a message
+	logger.Log("test message %s", "arg1")
+
+	// Test: Lock file mechanics
+	lockFile := filepath.Join(configDir, "auto.lock")
+
+	// Create lock file manually
+	lock := struct {
+		PID       int    `json:"pid"`
+		StartTime string `json:"start_time"`
+	}{
+		PID:       os.Getpid(),
+		StartTime: time.Now().Format(time.RFC3339),
+	}
+	lockData, _ := json.MarshalIndent(lock, "", "  ")
+	if err := os.WriteFile(lockFile, lockData, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify lock file exists
+	if _, err := os.Stat(lockFile); os.IsNotExist(err) {
+		t.Error("lock file should exist")
+	}
+
+	// Clean up lock
+	os.Remove(lockFile)
+
+	// Test: Stop file mechanics
+	stopFile := filepath.Join(configDir, "stop-auto")
+	if err := os.WriteFile(stopFile, []byte(time.Now().Format(time.RFC3339)), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify stop file exists
+	if _, err := os.Stat(stopFile); os.IsNotExist(err) {
+		t.Error("stop file should exist")
+	}
+
+	// Clean up stop file
+	os.Remove(stopFile)
+
+	// Test: Runner creation (but don't run it since it needs real beads)
+	opts := &auto.Options{
+		DryRun: true,
+		Check:  true,
+	}
+	runner := auto.NewRunner(cfg, opts)
+	if runner == nil {
+		t.Error("expected runner to be non-nil")
+	}
+
+	t.Log("Auto mode components integration test completed successfully")
+}
+
+// TestIntegration_PickerFallback tests the picker fallback behavior.
+func TestIntegration_PickerFallback(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "config")
+	worktreeRoot := filepath.Join(tmpDir, "worktrees")
+
+	// Setup config
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	configJSON := `{"worktree_root": "` + worktreeRoot + `"}`
+	if err := os.WriteFile(filepath.Join(configDir, "config.json"), []byte(configJSON), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "sessions.json"), []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := config.LoadFromDir(configDir)
+	if err != nil {
+		t.Fatalf("failed to load config: %v", err)
+	}
+
+	state, err := session.LoadState(cfg)
+	if err != nil {
+		t.Fatalf("failed to load state: %v", err)
+	}
+
+	// Test: Empty sessions list
+	if len(state.Sessions) != 0 {
+		t.Errorf("expected 0 sessions initially, got %d", len(state.Sessions))
+	}
+
+	// Add some mock sessions
+	state.Sessions["picker-alpha"] = &session.Session{
+		Bead:    "bead-alpha",
+		Project: "proj1",
+		Status:  "working",
+	}
+	state.Sessions["picker-beta"] = &session.Session{
+		Bead:    "bead-beta",
+		Project: "proj2",
+		Status:  "idle",
+	}
+	state.Sessions["picker-gamma"] = &session.Session{
+		Bead:    "bead-gamma",
+		Project: "proj1",
+		Status:  "working",
+	}
+
+	if err := state.Save(); err != nil {
+		t.Fatalf("failed to save state: %v", err)
+	}
+
+	// Test: Build picker entries
+	type pickerEntry struct {
+		name    string
+		bead    string
+		project string
+	}
+
+	var entries []pickerEntry
+	for name, sess := range state.Sessions {
+		entries = append(entries, pickerEntry{
+			name:    name,
+			bead:    sess.Bead,
+			project: sess.Project,
+		})
+	}
+
+	if len(entries) != 3 {
+		t.Errorf("expected 3 picker entries, got %d", len(entries))
+	}
+
+	// Test: Check fzf availability (don't fail if not present)
+	_, hasFzfErr := exec.LookPath("fzf")
+	t.Logf("fzf available: %v", hasFzfErr == nil)
+
+	t.Log("Picker fallback integration test completed successfully")
+}
+
+// TestIntegration_DirectMergeWorkflow tests the direct merge workflow.
+func TestIntegration_DirectMergeWorkflow(t *testing.T) {
+	tmpDir := t.TempDir()
+	repoDir := filepath.Join(tmpDir, "repo")
+	worktreeDir := filepath.Join(tmpDir, "worktree")
+
+	// Initialize main repo with main branch
+	if err := initGitRepo(repoDir); err != nil {
+		t.Fatalf("failed to init git repo: %v", err)
+	}
+
+	// Create a worktree with a feature branch
+	cmd := exec.Command("git", "-C", repoDir, "worktree", "add", "-b", "feature-direct-merge", worktreeDir)
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("failed to create worktree: %v", err)
+	}
+	defer func() {
+		exec.Command("git", "-C", repoDir, "worktree", "remove", "--force", worktreeDir).Run()
+	}()
+
+	// Make a change in the worktree
+	featureFile := filepath.Join(worktreeDir, "feature.txt")
+	if err := os.WriteFile(featureFile, []byte("feature content\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Commit the change
+	cmd = exec.Command("git", "-C", worktreeDir, "add", ".")
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("git add failed: %v", err)
+	}
+	cmd = exec.Command("git", "-C", worktreeDir, "commit", "-m", "Add feature")
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("git commit failed: %v", err)
+	}
+
+	// Test: Check no uncommitted changes
+	hasChanges, err := merge.HasUncommittedChanges(worktreeDir)
+	if err != nil {
+		t.Fatalf("HasUncommittedChanges failed: %v", err)
+	}
+	if hasChanges {
+		t.Error("expected no uncommitted changes after commit")
+	}
+
+	// Test: Get current branch
+	branch, err := merge.GetCurrentBranch(worktreeDir)
+	if err != nil {
+		t.Fatalf("GetCurrentBranch failed: %v", err)
+	}
+	if branch != "feature-direct-merge" {
+		t.Errorf("expected branch 'feature-direct-merge', got %q", branch)
+	}
+
+	// Note: We can't actually test DirectMerge without a remote,
+	// but we've tested all the helper functions it uses.
+
+	t.Log("Direct merge workflow integration test completed successfully")
 }
