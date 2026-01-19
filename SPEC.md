@@ -382,6 +382,82 @@ Done.
 
 ---
 
+## Seance (Talk to Past Sessions)
+
+Seance lets you talk to predecessor sessions. Instead of parsing logs, you can ask directly:
+- "Why did you make this decision?"
+- "Where were you stuck?"
+- "What did you try that didn't work?"
+
+### How It Works
+
+1. When sessions start, wt logs the Claude session ID to `~/.config/wt/events.jsonl`
+2. `wt seance` lists recent sessions (completed or killed)
+3. `wt seance <name>` forks the session using `claude --resume <id>`
+4. You can ask questions without modifying the original session
+
+### Commands
+
+#### `wt seance`
+List recent sessions.
+
+```bash
+$ wt seance
+┌─ Recent Sessions ───────────────────────────────────────────────────────┐
+│                                                                         │
+│  Name       Bead              Ended         Duration   Status           │
+│  ────       ────              ─────         ────────   ──────           │
+│  toast      supabyoi-pks      2h ago        4h 30m     Completed        │
+│  shadow     supabyoi-g4a      1d ago        2h 15m     Killed           │
+│  obsidian   reddit-saas-8lr   3d ago        6h 00m     Completed        │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+
+Talk to a session: wt seance <name>
+```
+
+Options:
+- `--project <name>`: Filter by project
+- `--recent <n>`: Show last N sessions (default: 20)
+
+#### `wt seance <name> [--prompt <question>]`
+Talk to a past session.
+
+```bash
+# Interactive conversation (forks session)
+$ wt seance toast
+Resuming session 'toast' (bead: supabyoi-pks)...
+Session ID: abc123-def456
+
+[Claude session opens with full context from toast]
+> Where did you put the nginx config?
+
+# One-shot question
+$ wt seance toast -p "What was blocking you?"
+Resuming session 'toast'...
+
+The main blocker was the DNS propagation delay. I implemented a
+retry mechanism with exponential backoff in deploy.py:142...
+```
+
+### Event Log (`~/.config/wt/events.jsonl`)
+
+```jsonl
+{"type":"session_start","name":"toast","bead":"supabyoi-pks","session_id":"abc123","timestamp":"2026-01-19T08:30:00Z"}
+{"type":"session_end","name":"toast","bead":"supabyoi-pks","session_id":"abc123","status":"completed","timestamp":"2026-01-19T13:00:00Z"}
+{"type":"session_start","name":"shadow","bead":"supabyoi-g4a","session_id":"def456","timestamp":"2026-01-19T09:15:00Z"}
+{"type":"session_end","name":"shadow","bead":"supabyoi-g4a","session_id":"def456","status":"killed","timestamp":"2026-01-19T11:30:00Z"}
+```
+
+### Implementation Notes
+
+- Uses Claude's `--resume <session-id>` flag to fork a session
+- Fork is read-only (doesn't modify original session's history)
+- Session IDs captured from Claude's output on startup
+- Events persisted even after session cleanup
+
+---
+
 ## Merge Modes
 
 Configured per-project in `merge_mode`:
@@ -733,7 +809,13 @@ $ wt close toast            # Cleanup
 - [ ] Desktop notifications
 - [ ] PR status in dashboard
 
-### Phase 6: Polish
+### Phase 6: Seance
+- [ ] Event logging (session IDs)
+- [ ] `wt seance` (list past sessions)
+- [ ] `wt seance <name>` (talk to past session)
+- [ ] Session ID to name mapping
+
+### Phase 7: Polish
 - [ ] Tmux keybindings
 - [ ] Claude skill
 - [ ] Shell completions
