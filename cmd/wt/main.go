@@ -290,9 +290,15 @@ func cmdNew(cfg *config.Config, args []string) error {
 
 	sessionName := flags.name
 	if sessionName == "" {
-		sessionName, err = pool.Allocate(state.UsedNames())
+		themeName, err := pool.Allocate(state.UsedNames())
 		if err != nil {
 			return err
+		}
+		// Prefix with project name for easier identification
+		if projectName != "" {
+			sessionName = projectName + "-" + themeName
+		} else {
+			sessionName = themeName
 		}
 	}
 
