@@ -705,8 +705,16 @@ wt hub --detach         # Returns to previous session
 
 **Key behaviors from hub:**
 - `wt new` stays in hub by default (use `--switch` to attach)
-- Workers auto-start with: "Work on bead X: Title. When done, create PR..."
+- Workers receive detailed workflow instructions and start working
 - Session names are project-prefixed: `wt-woody`, `supabyoi-buzz`
+- Workers do NOT run `wt done` - hub handles cleanup after review
+
+**Worker instructions include:**
+1. Implement the task
+2. Commit changes with descriptive message
+3. Run tests (if configured)
+4. Create PR (or push for direct mode)
+5. Notify completion - do NOT run `wt done`
 
 ### Hub vs Worker Sessions
 

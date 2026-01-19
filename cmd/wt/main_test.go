@@ -91,22 +91,25 @@ func TestParseNewFlags(t *testing.T) {
 
 func TestBuildInitialPrompt(t *testing.T) {
 	tests := []struct {
-		name      string
-		beadID    string
-		title     string
-		proj      *project.Project
-		wantContains []string
+		name            string
+		beadID          string
+		title           string
+		proj            *project.Project
+		wantContains    []string
 		wantNotContains []string
 	}{
 		{
-			name:   "no project",
+			name:   "no project - defaults to pr-review",
 			beadID: "test-123",
 			title:  "Fix the bug",
 			proj:   nil,
 			wantContains: []string{
 				"Work on bead test-123: Fix the bug.",
-				"create a PR for review",
-				"wt done",
+				"Workflow:",
+				"Implement the task",
+				"Commit your changes",
+				"Create a PR",
+				"Do NOT run `wt done`",
 			},
 			wantNotContains: []string{
 				"Run tests",
@@ -121,7 +124,9 @@ func TestBuildInitialPrompt(t *testing.T) {
 			},
 			wantContains: []string{
 				"Work on bead test-456: Add feature.",
-				"create a PR for review",
+				"Create a PR",
+				"ready for review",
+				"Do NOT run `wt done`",
 			},
 			wantNotContains: []string{
 				"Run tests",
@@ -135,7 +140,9 @@ func TestBuildInitialPrompt(t *testing.T) {
 				MergeMode: "direct",
 			},
 			wantContains: []string{
-				"merge directly to main",
+				"Push your changes",
+				"work is complete",
+				"Do NOT run `wt done`",
 			},
 		},
 		{
@@ -146,7 +153,9 @@ func TestBuildInitialPrompt(t *testing.T) {
 				MergeMode: "pr-auto",
 			},
 			wantContains: []string{
-				"auto-merge",
+				"Create a PR",
+				"cleanup after merge",
+				"Do NOT run `wt done`",
 			},
 		},
 		{
@@ -160,7 +169,7 @@ func TestBuildInitialPrompt(t *testing.T) {
 				},
 			},
 			wantContains: []string{
-				"Run tests before completing",
+				"Run tests and fix any failures",
 			},
 		},
 	}

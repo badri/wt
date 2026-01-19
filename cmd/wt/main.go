@@ -431,7 +431,17 @@ func buildInitialPrompt(beadID, title string, proj *project.Project) string {
 	var sb strings.Builder
 
 	// Main task
-	sb.WriteString(fmt.Sprintf("Work on bead %s: %s.", beadID, title))
+	sb.WriteString(fmt.Sprintf("Work on bead %s: %s.\n\n", beadID, title))
+
+	// Workflow instructions
+	sb.WriteString("Workflow:\n")
+	sb.WriteString("1. Implement the task\n")
+	sb.WriteString("2. Commit your changes with descriptive message\n")
+
+	// Add test instructions if configured
+	if proj != nil && proj.TestEnv != nil {
+		sb.WriteString("3. Run tests and fix any failures\n")
+	}
 
 	// Add merge mode instructions
 	mergeMode := "pr-review" // default
@@ -441,16 +451,14 @@ func buildInitialPrompt(beadID, title string, proj *project.Project) string {
 
 	switch mergeMode {
 	case "direct":
-		sb.WriteString(" When done, commit changes and run `wt done` to merge directly to main.")
+		sb.WriteString("4. Push your changes\n")
+		sb.WriteString("\nWhen finished, notify that work is complete. Do NOT run `wt done` - the hub will handle cleanup.")
 	case "pr-auto":
-		sb.WriteString(" When done, commit changes, create a PR, and run `wt done` to auto-merge.")
+		sb.WriteString("4. Create a PR with `gh pr create`\n")
+		sb.WriteString("\nWhen finished, notify that PR is ready. Do NOT run `wt done` - the hub will handle cleanup after merge.")
 	case "pr-review":
-		sb.WriteString(" When done, commit changes, create a PR for review, and run `wt done`.")
-	}
-
-	// Remind about tests only if project has test env configured
-	if proj != nil && proj.TestEnv != nil {
-		sb.WriteString(" Run tests before completing.")
+		sb.WriteString("4. Create a PR with `gh pr create`\n")
+		sb.WriteString("\nWhen finished, notify that PR is ready for review. Do NOT run `wt done` - the hub will handle cleanup after review.")
 	}
 
 	return sb.String()
