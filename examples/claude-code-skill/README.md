@@ -38,7 +38,7 @@ The skill helps Claude understand:
 
 1. Install wt CLI:
    ```bash
-   go install github.com/yourusername/wt/cmd/wt@latest
+   go install github.com/badri/wt/cmd/wt@latest
    ```
 
 2. Install beads CLI (wt depends on beads):
