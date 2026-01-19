@@ -1,6 +1,7 @@
 package events
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -165,6 +166,158 @@ func (l *Logger) FindSession(name string) (*Event, error) {
 	}
 
 	return nil, fmt.Errorf("session '%s' not found in history", name)
+}
+
+// Since returns events from the last duration
+func (l *Logger) Since(d time.Duration) ([]Event, error) {
+	cutoff := time.Now().Add(-d)
+	return l.SinceTime(cutoff)
+}
+
+// SinceTime returns events since the given time
+func (l *Logger) SinceTime(cutoff time.Time) ([]Event, error) {
+	allEvents, err := l.All()
+	if err != nil {
+		return nil, err
+	}
+
+	var filtered []Event
+	for _, e := range allEvents {
+		eventTime, err := time.Parse(time.RFC3339, e.Time)
+		if err != nil {
+			continue
+		}
+		if eventTime.After(cutoff) {
+			filtered = append(filtered, e)
+		}
+	}
+
+	return filtered, nil
+}
+
+// All returns all events
+func (l *Logger) All() ([]Event, error) {
+	data, err := os.ReadFile(l.eventsFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	var allEvents []Event
+	for _, line := range splitLines(data) {
+		if len(line) == 0 {
+			continue
+		}
+		var event Event
+		if err := json.Unmarshal(line, &event); err != nil {
+			continue
+		}
+		allEvents = append(allEvents, event)
+	}
+
+	return allEvents, nil
+}
+
+// NewSinceLastRead returns events since the last read marker and optionally clears
+func (l *Logger) NewSinceLastRead(clear bool) ([]Event, error) {
+	markerFile := l.eventsFile + ".lastread"
+
+	// Get last read time
+	var lastRead time.Time
+	if data, err := os.ReadFile(markerFile); err == nil {
+		lastRead, _ = time.Parse(time.RFC3339, string(data))
+	}
+
+	// Get events since last read
+	var events []Event
+	var err error
+	if lastRead.IsZero() {
+		// No marker, return recent events (last 10)
+		events, err = l.Recent(10)
+	} else {
+		events, err = l.SinceTime(lastRead)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	// Update marker if clearing
+	if clear {
+		now := time.Now().Format(time.RFC3339)
+		if err := os.WriteFile(markerFile, []byte(now), 0644); err != nil {
+			return events, fmt.Errorf("updating read marker: %w", err)
+		}
+	}
+
+	return events, nil
+}
+
+// MarkAsRead updates the last read marker to now
+func (l *Logger) MarkAsRead() error {
+	markerFile := l.eventsFile + ".lastread"
+	now := time.Now().Format(time.RFC3339)
+	return os.WriteFile(markerFile, []byte(now), 0644)
+}
+
+// Tail watches for new events and sends them to the channel
+func (l *Logger) Tail(ctx context.Context, events chan<- Event) error {
+	// Get current file size
+	var lastSize int64
+	if info, err := os.Stat(l.eventsFile); err == nil {
+		lastSize = info.Size()
+	}
+
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			info, err := os.Stat(l.eventsFile)
+			if err != nil {
+				continue
+			}
+
+			if info.Size() > lastSize {
+				// Read new content
+				f, err := os.Open(l.eventsFile)
+				if err != nil {
+					continue
+				}
+
+				f.Seek(lastSize, 0)
+				newData := make([]byte, info.Size()-lastSize)
+				f.Read(newData)
+				f.Close()
+
+				for _, line := range splitLines(newData) {
+					if len(line) == 0 {
+						continue
+					}
+					var event Event
+					if err := json.Unmarshal(line, &event); err != nil {
+						continue
+					}
+					select {
+					case events <- event:
+					case <-ctx.Done():
+						return nil
+					}
+				}
+
+				lastSize = info.Size()
+			}
+		}
+	}
+}
+
+// EventsFile returns the path to the events file
+func (l *Logger) EventsFile() string {
+	return l.eventsFile
 }
 
 func splitLines(data []byte) [][]byte {

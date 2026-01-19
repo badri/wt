@@ -1,9 +1,13 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
+	"strings"
+	"syscall"
 	"time"
 
 	"github.com/badri/wt/internal/auto"
@@ -91,6 +95,8 @@ func run() error {
 		return cmdProject(cfg, args[1:])
 	case "auto":
 		return cmdAuto(cfg, args[1:])
+	case "events":
+		return cmdEvents(cfg, args[1:])
 	default:
 		// Assume it's a session name or bead ID to switch to
 		return cmdSwitch(cfg, args[0])
@@ -1493,4 +1499,165 @@ func parseAutoFlags(args []string) *auto.Options {
 		}
 	}
 	return opts
+}
+
+// cmdEvents shows wt events
+func cmdEvents(cfg *config.Config, args []string) error {
+	flags := parseEventsFlags(args)
+	logger := events.NewLogger(cfg)
+
+	// Handle --new and --clear for hook integration
+	if flags.newOnly {
+		evts, err := logger.NewSinceLastRead(flags.clear)
+		if err != nil {
+			return err
+		}
+		if len(evts) == 0 {
+			return nil // Silent when no new events (for hooks)
+		}
+		for _, e := range evts {
+			printEvent(e)
+		}
+		return nil
+	}
+
+	// Handle --tail (follow mode)
+	if flags.tail {
+		return tailEvents(cfg, logger)
+	}
+
+	// Handle --since
+	var evts []events.Event
+	var err error
+
+	if flags.since != "" {
+		duration, err := parseDuration(flags.since)
+		if err != nil {
+			return fmt.Errorf("invalid duration: %w", err)
+		}
+		evts, err = logger.Since(duration)
+		if err != nil {
+			return err
+		}
+	} else {
+		// Default: recent 20 events
+		evts, err = logger.Recent(20)
+		if err != nil {
+			return err
+		}
+	}
+
+	if len(evts) == 0 {
+		fmt.Println("No events.")
+		return nil
+	}
+
+	fmt.Printf("Events (%d):\n\n", len(evts))
+	for _, e := range evts {
+		printEvent(e)
+	}
+
+	return nil
+}
+
+func printEvent(e events.Event) {
+	// Parse time for display
+	t, _ := time.Parse(time.RFC3339, e.Time)
+	timeStr := t.Format("15:04:05")
+
+	switch e.Type {
+	case events.EventSessionStart:
+		fmt.Printf("[%s] %s session '%s' started for bead %s\n",
+			timeStr, e.Project, e.Session, e.Bead)
+	case events.EventSessionEnd:
+		extra := ""
+		if e.PRURL != "" {
+			extra = fmt.Sprintf(" (PR: %s)", e.PRURL)
+		}
+		fmt.Printf("[%s] %s session '%s' completed bead %s%s\n",
+			timeStr, e.Project, e.Session, e.Bead, extra)
+	case events.EventSessionKill:
+		fmt.Printf("[%s] %s session '%s' killed (bead: %s)\n",
+			timeStr, e.Project, e.Session, e.Bead)
+	case events.EventPRCreated:
+		fmt.Printf("[%s] %s PR created for %s: %s\n",
+			timeStr, e.Project, e.Bead, e.PRURL)
+	case events.EventPRMerged:
+		fmt.Printf("[%s] %s PR merged for %s: %s\n",
+			timeStr, e.Project, e.Bead, e.PRURL)
+	default:
+		fmt.Printf("[%s] %s: %s (%s)\n", timeStr, e.Type, e.Session, e.Bead)
+	}
+}
+
+func tailEvents(cfg *config.Config, logger *events.Logger) error {
+	fmt.Printf("Watching events (Ctrl+C to stop)...\n\n")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Handle Ctrl+C
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		cancel()
+	}()
+
+	eventsCh := make(chan events.Event)
+
+	go func() {
+		logger.Tail(ctx, eventsCh)
+		close(eventsCh)
+	}()
+
+	for e := range eventsCh {
+		printEvent(e)
+	}
+
+	return nil
+}
+
+type eventsFlags struct {
+	tail    bool
+	since   string
+	newOnly bool
+	clear   bool
+}
+
+func parseEventsFlags(args []string) eventsFlags {
+	var flags eventsFlags
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--tail", "-f":
+			flags.tail = true
+		case "--since", "-s":
+			if i+1 < len(args) {
+				flags.since = args[i+1]
+				i++
+			}
+		case "--new", "-n":
+			flags.newOnly = true
+		case "--clear", "-c":
+			flags.clear = true
+		}
+	}
+	return flags
+}
+
+// parseDuration parses duration strings like "5m", "1h", "30s"
+func parseDuration(s string) (time.Duration, error) {
+	// Handle shorthand
+	s = strings.TrimSpace(s)
+	if len(s) == 0 {
+		return 0, fmt.Errorf("empty duration")
+	}
+
+	// Try standard Go duration
+	if d, err := time.ParseDuration(s); err == nil {
+		return d, nil
+	}
+
+	// Handle "5m" style without explicit unit parsing issues
+	return time.ParseDuration(s)
 }

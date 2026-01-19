@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/badri/wt/internal/config"
 )
@@ -242,5 +243,119 @@ func TestLogger_AppendOnly(t *testing.T) {
 	events, _ := logger.Recent(10)
 	if len(events) != 2 {
 		t.Errorf("expected 2 events (append-only), got %d", len(events))
+	}
+}
+
+func TestLogger_Since(t *testing.T) {
+	cfg := setupTestConfig(t)
+	logger := NewLogger(cfg)
+
+	// Log events
+	_ = logger.LogSessionStart("session-1", "bead-1", "proj", "/path")
+	_ = logger.LogSessionStart("session-2", "bead-2", "proj", "/path")
+
+	// Get events since 1 hour ago (should include all)
+	events, err := logger.Since(1 * time.Hour)
+	if err != nil {
+		t.Fatalf("Since failed: %v", err)
+	}
+
+	if len(events) != 2 {
+		t.Errorf("expected 2 events, got %d", len(events))
+	}
+}
+
+func TestLogger_All(t *testing.T) {
+	cfg := setupTestConfig(t)
+	logger := NewLogger(cfg)
+
+	// Log events
+	for i := range 5 {
+		_ = logger.LogSessionStart("session-"+string(rune('a'+i)), "bead", "proj", "/path")
+	}
+
+	// Get all events
+	events, err := logger.All()
+	if err != nil {
+		t.Fatalf("All failed: %v", err)
+	}
+
+	if len(events) != 5 {
+		t.Errorf("expected 5 events, got %d", len(events))
+	}
+}
+
+func TestLogger_NewSinceLastRead(t *testing.T) {
+	cfg := setupTestConfig(t)
+	logger := NewLogger(cfg)
+
+	// Log initial events
+	_ = logger.LogSessionStart("session-1", "bead-1", "proj", "/path")
+	_ = logger.LogSessionStart("session-2", "bead-2", "proj", "/path")
+
+	// First read - should return recent events (no prior marker = returns Recent(10))
+	events1, err := logger.NewSinceLastRead(true)
+	if err != nil {
+		t.Fatalf("NewSinceLastRead failed: %v", err)
+	}
+	if len(events1) != 2 {
+		t.Errorf("expected 2 events on first read, got %d", len(events1))
+	}
+
+	// Second read immediately after clear - should return 0 (marker was just set)
+	// Wait to cross second boundary since RFC3339 has second precision
+	time.Sleep(1100 * time.Millisecond)
+
+	events2, err := logger.NewSinceLastRead(false)
+	if err != nil {
+		t.Fatalf("NewSinceLastRead failed: %v", err)
+	}
+	if len(events2) != 0 {
+		t.Errorf("expected 0 events after clear, got %d", len(events2))
+	}
+
+	// Log new event (will have timestamp after the marker)
+	_ = logger.LogSessionStart("session-3", "bead-3", "proj", "/path")
+
+	// Third read - should return new event
+	events3, err := logger.NewSinceLastRead(false)
+	if err != nil {
+		t.Fatalf("NewSinceLastRead failed: %v", err)
+	}
+	if len(events3) != 1 {
+		t.Errorf("expected 1 new event, got %d", len(events3))
+	}
+}
+
+func TestLogger_MarkAsRead(t *testing.T) {
+	cfg := setupTestConfig(t)
+	logger := NewLogger(cfg)
+
+	// Log event
+	_ = logger.LogSessionStart("session-1", "bead-1", "proj", "/path")
+
+	// Mark as read
+	err := logger.MarkAsRead()
+	if err != nil {
+		t.Fatalf("MarkAsRead failed: %v", err)
+	}
+
+	// NewSinceLastRead should return 0 events
+	events, err := logger.NewSinceLastRead(false)
+	if err != nil {
+		t.Fatalf("NewSinceLastRead failed: %v", err)
+	}
+	if len(events) != 0 {
+		t.Errorf("expected 0 events after MarkAsRead, got %d", len(events))
+	}
+}
+
+func TestLogger_EventsFile(t *testing.T) {
+	cfg := setupTestConfig(t)
+	logger := NewLogger(cfg)
+
+	path := logger.EventsFile()
+	if path == "" {
+		t.Error("expected non-empty events file path")
 	}
 }
