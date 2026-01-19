@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-01-19
+
 ### Added
 - `wt handoff` - Handoff hub session to fresh Claude instance with context preservation
 - `wt handoff -m "notes"` - Include custom message in handoff
