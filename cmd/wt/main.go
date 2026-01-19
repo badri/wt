@@ -9,6 +9,7 @@ import (
 	"github.com/badri/wt/internal/bead"
 	"github.com/badri/wt/internal/config"
 	"github.com/badri/wt/internal/merge"
+	"github.com/badri/wt/internal/monitor"
 	"github.com/badri/wt/internal/namepool"
 	"github.com/badri/wt/internal/project"
 	"github.com/badri/wt/internal/session"
@@ -59,6 +60,8 @@ func run() error {
 		return cmdStatus(cfg)
 	case "abandon":
 		return cmdAbandon(cfg)
+	case "watch":
+		return cmdWatch(cfg)
 	case "projects":
 		return cmdProjects(cfg)
 	case "ready":
@@ -1020,4 +1023,93 @@ func cmdAbandon(cfg *config.Config) error {
 
 	fmt.Printf("\nSession abandoned. Bead %s is still open.\n", sess.Bead)
 	return nil
+}
+
+// cmdWatch displays a live dashboard of all sessions
+func cmdWatch(cfg *config.Config) error {
+	const refreshInterval = 2 * time.Second
+	const idleThreshold = 5 // minutes
+
+	// Track previous states for notifications
+	prevStates := make(map[string]string)
+
+	for {
+		// Clear screen
+		fmt.Print("\033[H\033[2J")
+
+		state, err := session.LoadState(cfg)
+		if err != nil {
+			return err
+		}
+
+		now := time.Now().Format("15:04:05")
+		fmt.Printf("┌─ wt watch ─────────────────────────────────────────────── %s ─┐\n", now)
+		fmt.Println("│                                                                       │")
+
+		if len(state.Sessions) == 0 {
+			fmt.Println("│  No active sessions.                                                 │")
+			fmt.Println("│                                                                       │")
+			fmt.Println("│  Start one with: wt new <bead>                                       │")
+		} else {
+			fmt.Printf("│  %-3s %-10s %-18s %-8s %-6s %-10s %-6s │\n",
+				"", "Name", "Bead", "Status", "Idle", "PR", "Project")
+			fmt.Printf("│  %-3s %-10s %-18s %-8s %-6s %-10s %-6s │\n",
+				"", "────", "────", "──────", "────", "──", "───────")
+
+			for name, sess := range state.Sessions {
+				// Detect status from tmux activity
+				status := monitor.DetectStatus(name, idleThreshold)
+				idleMin := monitor.GetIdleMinutes(name)
+
+				// Get PR status
+				prStatus, _ := monitor.GetPRStatus(sess.Worktree, sess.Branch)
+
+				// Format idle time
+				idleStr := "-"
+				if idleMin >= 0 {
+					if idleMin < 60 {
+						idleStr = fmt.Sprintf("%dm", idleMin)
+					} else {
+						idleStr = fmt.Sprintf("%dh%dm", idleMin/60, idleMin%60)
+					}
+				}
+
+				// Format PR status
+				prStr := "-"
+				if prStatus != "none" && prStatus != "" {
+					prStr = prStatus
+				}
+
+				statusIcon := monitor.StatusIcon(status)
+				prIcon := monitor.PRStatusIcon(prStatus)
+
+				fmt.Printf("│  %s %-10s %-18s %-8s %-6s %s %-8s %-6s │\n",
+					statusIcon,
+					truncate(name, 10),
+					truncate(sess.Bead, 18),
+					status,
+					idleStr,
+					prIcon,
+					truncate(prStr, 8),
+					truncate(sess.Project, 6))
+
+				// Send notification on status change
+				prevStatus, exists := prevStates[name]
+				if exists && prevStatus != status {
+					if status == "idle" {
+						monitor.Notify("wt: Session Idle", fmt.Sprintf("Session '%s' is now idle", name))
+					} else if status == "error" {
+						monitor.Notify("wt: Session Error", fmt.Sprintf("Session '%s' has an error", name))
+					}
+				}
+				prevStates[name] = status
+			}
+		}
+
+		fmt.Println("│                                                                       │")
+		fmt.Println("└───────────────────────────────────────────────────────────────────────┘")
+		fmt.Println("\nPress Ctrl+C to exit")
+
+		time.Sleep(refreshInterval)
+	}
 }
