@@ -10,6 +10,7 @@ import (
 
 	"github.com/badri/wt/internal/config"
 	"github.com/badri/wt/internal/namepool"
+	"github.com/badri/wt/internal/project"
 	"github.com/badri/wt/internal/session"
 	"github.com/badri/wt/internal/tmux"
 	"github.com/badri/wt/internal/worktree"
@@ -206,4 +207,107 @@ func initGitRepo(path string) error {
 
 	cmd = exec.Command("git", "-C", path, "commit", "-m", "Initial commit")
 	return cmd.Run()
+}
+
+// TestIntegration_ProjectWorkflow tests project registration and lookup.
+func TestIntegration_ProjectWorkflow(t *testing.T) {
+	// Create temporary directories
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "config")
+	repoDir := filepath.Join(tmpDir, "repo")
+
+	// Initialize a git repository
+	if err := initGitRepo(repoDir); err != nil {
+		t.Fatalf("failed to init git repo: %v", err)
+	}
+
+	// Create config
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "namepool.txt"), []byte("test\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "sessions.json"), []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := config.LoadFromDir(configDir)
+	if err != nil {
+		t.Fatalf("failed to load config: %v", err)
+	}
+
+	mgr := project.NewManager(cfg)
+
+	// Test: List empty projects
+	projects, err := mgr.List()
+	if err != nil {
+		t.Fatalf("List failed: %v", err)
+	}
+	if len(projects) != 0 {
+		t.Errorf("expected 0 projects initially, got %d", len(projects))
+	}
+
+	// Test: Add project
+	t.Log("Adding project 'testproj'")
+	proj, err := mgr.Add("testproj", repoDir)
+	if err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+	if proj.Name != "testproj" {
+		t.Errorf("expected name 'testproj', got %q", proj.Name)
+	}
+	if proj.BeadsPrefix != "testproj" {
+		t.Errorf("expected beads_prefix 'testproj', got %q", proj.BeadsPrefix)
+	}
+
+	// Test: Get project
+	proj2, err := mgr.Get("testproj")
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	if proj2.Repo != repoDir {
+		t.Errorf("expected repo %q, got %q", repoDir, proj2.Repo)
+	}
+
+	// Test: List projects
+	projects, err = mgr.List()
+	if err != nil {
+		t.Fatalf("List failed: %v", err)
+	}
+	if len(projects) != 1 {
+		t.Errorf("expected 1 project, got %d", len(projects))
+	}
+
+	// Test: Find by bead prefix
+	proj3, err := mgr.FindByBeadPrefix("testproj-abc123")
+	if err != nil {
+		t.Fatalf("FindByBeadPrefix failed: %v", err)
+	}
+	if proj3.Name != "testproj" {
+		t.Errorf("expected project 'testproj', got %q", proj3.Name)
+	}
+
+	// Test: Update project config
+	proj2.MergeMode = "direct"
+	if err := mgr.Save(proj2); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+
+	proj4, _ := mgr.Get("testproj")
+	if proj4.MergeMode != "direct" {
+		t.Errorf("expected merge_mode 'direct', got %q", proj4.MergeMode)
+	}
+
+	// Test: Delete project
+	if err := mgr.Delete("testproj"); err != nil {
+		t.Fatalf("Delete failed: %v", err)
+	}
+
+	projects, _ = mgr.List()
+	if len(projects) != 0 {
+		t.Errorf("expected 0 projects after delete, got %d", len(projects))
+	}
+
+	t.Log("Project integration test completed successfully")
 }
