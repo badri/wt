@@ -249,10 +249,28 @@ func cmdNew(cfg *config.Config, args []string) error {
 		}
 	}
 
-	// Allocate name
-	pool, err := namepool.Load(cfg)
-	if err != nil {
-		return err
+	// Allocate name from themed pool
+	var pool *namepool.Pool
+	projectName := ""
+	if proj != nil {
+		projectName = proj.Name
+	} else if beadInfo.Project != "" {
+		projectName = beadInfo.Project
+	}
+
+	if projectName != "" {
+		// Use themed namepool based on project name
+		pool, err = namepool.LoadForProject(projectName)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Using theme: %s\n", pool.Theme())
+	} else {
+		// Fall back to file-based namepool
+		pool, err = namepool.Load(cfg)
+		if err != nil {
+			return err
+		}
 	}
 
 	sessionName := flags.name
@@ -322,10 +340,12 @@ func cmdNew(cfg *config.Config, args []string) error {
 		}
 	}
 
-	// Determine project name
-	projectName := beadInfo.Project
-	if proj != nil {
-		projectName = proj.Name
+	// Determine project name (may have been set earlier for namepool)
+	if projectName == "" {
+		projectName = beadInfo.Project
+		if proj != nil {
+			projectName = proj.Name
+		}
 	}
 
 	// Save session state

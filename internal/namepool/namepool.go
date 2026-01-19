@@ -10,10 +10,12 @@ import (
 )
 
 type Pool struct {
-	names []string
-	path  string
+	names   []string
+	theme   string
+	path    string // optional, for file-based pools
 }
 
+// Load loads a namepool from the config file (legacy/fallback method)
 func Load(cfg *config.Config) (*Pool, error) {
 	path := cfg.NamepoolPath()
 	file, err := os.Open(path)
@@ -38,6 +40,26 @@ func Load(cfg *config.Config) (*Pool, error) {
 	return &Pool{names: names, path: path}, nil
 }
 
+// LoadForProject loads a themed namepool based on the project name.
+// The project name is hashed to consistently select a theme.
+func LoadForProject(projectName string) (*Pool, error) {
+	theme := ThemeForProject(projectName)
+	names, err := GetThemeNames(theme)
+	if err != nil {
+		return nil, err
+	}
+	return &Pool{names: names, theme: theme}, nil
+}
+
+// LoadTheme loads a specific theme by name
+func LoadTheme(themeName string) (*Pool, error) {
+	names, err := GetThemeNames(themeName)
+	if err != nil {
+		return nil, err
+	}
+	return &Pool{names: names, theme: themeName}, nil
+}
+
 func (p *Pool) Allocate(usedNames []string) (string, error) {
 	used := make(map[string]bool)
 	for _, n := range usedNames {
@@ -55,6 +77,10 @@ func (p *Pool) Allocate(usedNames []string) (string, error) {
 
 func (p *Pool) Names() []string {
 	return p.names
+}
+
+func (p *Pool) Theme() string {
+	return p.theme
 }
 
 // NewPool creates a Pool with the given names (useful for testing)
