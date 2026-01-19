@@ -382,6 +382,56 @@ wt                          # See any sessions still running
 
 ---
 
+## Event Monitoring
+
+Track what's happening across worker sessions with `wt events`.
+
+### Basic Usage
+
+```bash
+wt events                   # Show recent 20 events
+wt events --tail            # Follow mode (like tail -f)
+wt events --since 5m        # Events from last 5 minutes
+wt events --since 1h        # Events from last hour
+```
+
+### Events Logged
+
+- `session_start` - Worker session created
+- `session_end` - Worker completed work (includes PR URL if created)
+- `session_kill` - Worker was killed
+- `pr_created` - Pull request created
+- `pr_merged` - Pull request merged
+
+### Hook Integration
+
+Use `--new --clear` for Claude Code hook integration:
+
+```bash
+wt events --new --clear     # Show new events, mark as read
+```
+
+**Claude Code settings.json:**
+```json
+{
+  "hooks": {
+    "prompt-submit": ["wt events --new --clear"]
+  }
+}
+```
+
+This automatically reports events at the start of each conversation turn:
+- "wt session 'toast' completed bead wt-xyz (PR: https://...)"
+- "wt session 'shadow' was killed (bead: wt-abc)"
+
+### When to Use
+
+- **Monitor workers**: See what happened while you were away
+- **Hub notifications**: Auto-report via hooks without manually checking
+- **Debugging**: Track session lifecycle events
+
+---
+
 ## Common Patterns
 
 ### Pattern 1: Morning Workflow
@@ -530,6 +580,9 @@ Workers inherit `BEADS_DIR` from the project, so bd commands inside workers oper
 | `wt auto` | Process ready beads autonomously |
 | `wt auto --dry-run` | Preview auto run |
 | `wt auto --stop` | Stop running auto gracefully |
+| `wt events` | Show recent events |
+| `wt events --tail` | Follow events in real-time |
+| `wt events --new --clear` | Get new events (for hooks) |
 
 ---
 
