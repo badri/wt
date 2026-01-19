@@ -13,6 +13,7 @@ import (
 	"github.com/badri/wt/internal/auto"
 	"github.com/badri/wt/internal/bead"
 	"github.com/badri/wt/internal/config"
+	"github.com/badri/wt/internal/doctor"
 	"github.com/badri/wt/internal/events"
 	"github.com/badri/wt/internal/merge"
 	"github.com/badri/wt/internal/monitor"
@@ -97,6 +98,8 @@ func run() error {
 		return cmdAuto(cfg, args[1:])
 	case "events":
 		return cmdEvents(cfg, args[1:])
+	case "doctor":
+		return doctor.Run(cfg)
 	default:
 		// Assume it's a session name or bead ID to switch to
 		return cmdSwitch(cfg, args[0])
