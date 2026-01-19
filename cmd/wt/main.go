@@ -393,7 +393,7 @@ func cmdNew(cfg *config.Config, args []string) error {
 	// Send initial work prompt to Claude after a short delay
 	go func() {
 		time.Sleep(2 * time.Second) // Wait for Claude to start
-		prompt := fmt.Sprintf("Work on bead %s: %s", beadID, beadInfo.Title)
+		prompt := buildInitialPrompt(beadID, beadInfo.Title, proj)
 		sendPromptCmd := exec.Command("tmux", "send-keys", "-t", sessionName, prompt, "Enter")
 		sendPromptCmd.Run()
 	}()
@@ -413,6 +413,34 @@ func cmdNew(cfg *config.Config, args []string) error {
 	}
 
 	return nil
+}
+
+// buildInitialPrompt creates the prompt to send to Claude when starting work on a bead
+func buildInitialPrompt(beadID, title string, proj *project.Project) string {
+	var sb strings.Builder
+
+	// Main task
+	sb.WriteString(fmt.Sprintf("Work on bead %s: %s.", beadID, title))
+
+	// Add merge mode instructions
+	mergeMode := "pr-review" // default
+	if proj != nil && proj.MergeMode != "" {
+		mergeMode = proj.MergeMode
+	}
+
+	switch mergeMode {
+	case "direct":
+		sb.WriteString(" When done, commit changes and run `wt done` to merge directly to main.")
+	case "pr-auto":
+		sb.WriteString(" When done, commit changes, create a PR, and run `wt done` to auto-merge.")
+	case "pr-review":
+		sb.WriteString(" When done, commit changes, create a PR for review, and run `wt done`.")
+	}
+
+	// Remind about tests
+	sb.WriteString(" Run tests before completing.")
+
+	return sb.String()
 }
 
 func cmdSwitch(cfg *config.Config, nameOrBead string) error {
