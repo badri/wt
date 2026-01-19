@@ -59,7 +59,7 @@ func run() error {
 	switch args[0] {
 	case "new":
 		if len(args) < 2 {
-			return fmt.Errorf("usage: wt new <bead-id> [--repo <path>] [--name <name>] [--no-switch] [--switch]")
+			return fmt.Errorf("usage: wt new <bead-id> [--repo <path>] [--name <name>] [--no-switch] [--switch] [--no-test-env]")
 		}
 		return cmdNew(cfg, args[1:])
 	case "kill":
@@ -143,6 +143,7 @@ type newFlags struct {
 	name        string
 	noSwitch    bool
 	forceSwitch bool
+	noTestEnv   bool
 }
 
 func parseNewFlags(args []string) (beadID string, flags newFlags) {
@@ -163,6 +164,8 @@ func parseNewFlags(args []string) (beadID string, flags newFlags) {
 			flags.noSwitch = true
 		case "--switch":
 			flags.forceSwitch = true
+		case "--no-test-env":
+			flags.noTestEnv = true
 		}
 	}
 	return
@@ -337,8 +340,8 @@ func cmdNew(cfg *config.Config, args []string) error {
 		return fmt.Errorf("creating tmux session: %w", err)
 	}
 
-	// Run test env setup if configured
-	if proj != nil && proj.TestEnv != nil && proj.TestEnv.Setup != "" {
+	// Run test env setup if configured and not skipped
+	if proj != nil && proj.TestEnv != nil && proj.TestEnv.Setup != "" && !flags.noTestEnv {
 		fmt.Println("Running test environment setup...")
 		if err := testenv.RunSetup(proj, worktreePath, portOffset); err != nil {
 			fmt.Printf("Warning: test env setup failed: %v\n", err)
@@ -351,6 +354,8 @@ func cmdNew(cfg *config.Config, args []string) error {
 				fmt.Printf("Warning: health check failed: %v\n", err)
 			}
 		}
+	} else if flags.noTestEnv && proj != nil && proj.TestEnv != nil {
+		fmt.Println("Skipping test environment setup (--no-test-env)")
 	}
 
 	// Run on_create hooks if configured
@@ -443,8 +448,10 @@ func buildInitialPrompt(beadID, title string, proj *project.Project) string {
 		sb.WriteString(" When done, commit changes, create a PR for review, and run `wt done`.")
 	}
 
-	// Remind about tests
-	sb.WriteString(" Run tests before completing.")
+	// Remind about tests only if project has test env configured
+	if proj != nil && proj.TestEnv != nil {
+		sb.WriteString(" Run tests before completing.")
+	}
 
 	return sb.String()
 }
