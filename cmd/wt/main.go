@@ -111,6 +111,8 @@ func run() error {
 		return cmdEvents(cfg, args[1:])
 	case "doctor":
 		return doctor.Run(cfg)
+	case "config":
+		return cmdConfig(cfg, args[1:])
 	case "pick":
 		return cmdPick(cfg)
 	case "keys":
@@ -1867,7 +1869,7 @@ _wt_completions() {
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
 
-    commands="list new kill close done status abandon watch seance projects ready create beads project auto events doctor pick keys completion handoff prime hub help"
+    commands="list new kill close done status abandon watch seance projects ready create beads project auto events doctor config pick keys completion handoff prime hub help"
 
     case "${prev}" in
         wt)
@@ -1912,6 +1914,10 @@ _wt_completions() {
             COMPREPLY=( $(compgen -W "--status --detach" -- "${cur}") )
             return 0
             ;;
+        config)
+            COMPREPLY=( $(compgen -W "show init set editor" -- "${cur}") )
+            return 0
+            ;;
         *)
             COMPREPLY=( $(compgen -W "${commands}" -- "${cur}") )
             return 0
@@ -1954,6 +1960,7 @@ _wt() {
         'prime:Inject startup context'
         'hub:Create or attach to hub session'
         'help:Show help message'
+        'config:Manage wt configuration'
     )
 
     _arguments -C \
@@ -1999,6 +2006,9 @@ _wt() {
                 hub)
                     _describe 'flag' '(--status --detach)'
                     ;;
+                config)
+                    _describe 'subcommand' '(show init set editor)'
+                    ;;
             esac
             ;;
     esac
@@ -2038,6 +2048,7 @@ complete -c wt -n __fish_use_subcommand -a handoff -d 'Handoff to fresh Claude i
 complete -c wt -n __fish_use_subcommand -a prime -d 'Inject startup context'
 complete -c wt -n __fish_use_subcommand -a hub -d 'Create or attach to hub session'
 complete -c wt -n __fish_use_subcommand -a help -d 'Show help message'
+complete -c wt -n __fish_use_subcommand -a config -d 'Manage wt configuration'
 
 # Session names for bare wt command
 complete -c wt -n __fish_use_subcommand -a "(wt list 2>/dev/null | grep -E '^\│\s+[🟢🟡🔴]' | awk '{print \$2}')" -d 'Switch to session'
@@ -2063,6 +2074,9 @@ complete -c wt -n '__fish_seen_subcommand_from completion' -a 'bash zsh fish' -d
 # Completions for 'hub' - flags
 complete -c wt -n '__fish_seen_subcommand_from hub' -l status -s s -d 'Show hub status'
 complete -c wt -n '__fish_seen_subcommand_from hub' -l detach -s d -d 'Detach from hub'
+
+# Completions for 'config' - subcommands
+complete -c wt -n '__fish_seen_subcommand_from config' -a 'show init set editor' -d 'Config subcommand'
 `
 
 // cmdVersion prints version information
@@ -2127,6 +2141,12 @@ Automation:
   auto --dry-run   Preview what would run
   auto --stop      Stop running auto gracefully
 
+Configuration:
+  config           Show current configuration
+  config init      Create config file with defaults
+  config editor    Set Claude editor command (with/without permissions)
+  config set       Set a config value
+
 Diagnostics:
   doctor           Run health checks on wt setup
   keys             Output tmux keybindings for .tmux.conf
@@ -2141,6 +2161,113 @@ Flags:
 Use "wt <command> --help" for more information about a command.
 `
 	fmt.Print(help)
+	return nil
+}
+
+// cmdConfig manages wt configuration
+func cmdConfig(cfg *config.Config, args []string) error {
+	// Parse subcommand
+	if len(args) == 0 {
+		return showConfig(cfg)
+	}
+
+	switch args[0] {
+	case "show":
+		return showConfig(cfg)
+	case "init":
+		return initConfig(cfg)
+	case "set":
+		if len(args) < 3 {
+			return fmt.Errorf("usage: wt config set <key> <value>")
+		}
+		return setConfig(cfg, args[1], args[2])
+	case "editor":
+		return configEditor(cfg, args[1:])
+	default:
+		return fmt.Errorf("unknown config subcommand: %s\nusage: wt config [show|init|set|editor]", args[0])
+	}
+}
+
+func showConfig(cfg *config.Config) error {
+	fmt.Println("wt configuration")
+	fmt.Println("================")
+	fmt.Printf("Config file:     %s", cfg.ConfigPath())
+	if cfg.ConfigExists() {
+		fmt.Println(" (exists)")
+	} else {
+		fmt.Println(" (not created)")
+	}
+	fmt.Println()
+	fmt.Printf("worktree_root:   %s\n", cfg.WorktreeRoot)
+	fmt.Printf("editor_cmd:      %s\n", cfg.EditorCmd)
+	fmt.Printf("merge_mode:      %s\n", cfg.DefaultMergeMode)
+	return nil
+}
+
+func initConfig(cfg *config.Config) error {
+	if cfg.ConfigExists() {
+		fmt.Printf("Config file already exists: %s\n", cfg.ConfigPath())
+		return nil
+	}
+
+	if err := cfg.Save(); err != nil {
+		return fmt.Errorf("creating config file: %w", err)
+	}
+
+	fmt.Printf("Created config file: %s\n", cfg.ConfigPath())
+	return nil
+}
+
+func setConfig(cfg *config.Config, key, value string) error {
+	switch key {
+	case "worktree_root":
+		cfg.WorktreeRoot = value
+	case "editor_cmd":
+		cfg.EditorCmd = value
+	case "merge_mode", "default_merge_mode":
+		cfg.DefaultMergeMode = value
+	default:
+		return fmt.Errorf("unknown config key: %s\nvalid keys: worktree_root, editor_cmd, merge_mode", key)
+	}
+
+	if err := cfg.Save(); err != nil {
+		return fmt.Errorf("saving config: %w", err)
+	}
+
+	fmt.Printf("Set %s = %s\n", key, value)
+	return nil
+}
+
+func configEditor(cfg *config.Config, args []string) error {
+	// If no args, show current and prompt
+	if len(args) == 0 {
+		fmt.Println("Select Claude editor command:")
+		fmt.Println()
+		fmt.Println("  1) claude --dangerously-skip-permissions  (recommended for automation)")
+		fmt.Println("  2) claude                                  (with permission prompts)")
+		fmt.Println()
+		fmt.Printf("Current: %s\n", cfg.EditorCmd)
+		fmt.Println()
+		fmt.Println("Usage: wt config editor [1|2|skip-permissions|with-prompts]")
+		return nil
+	}
+
+	var newCmd string
+	switch args[0] {
+	case "1", "skip-permissions", "skip":
+		newCmd = "claude --dangerously-skip-permissions"
+	case "2", "with-prompts", "prompts":
+		newCmd = "claude"
+	default:
+		return fmt.Errorf("invalid option: %s\nuse: 1, 2, skip-permissions, or with-prompts", args[0])
+	}
+
+	cfg.EditorCmd = newCmd
+	if err := cfg.Save(); err != nil {
+		return fmt.Errorf("saving config: %w", err)
+	}
+
+	fmt.Printf("Set editor_cmd = %s\n", newCmd)
 	return nil
 }
 

@@ -78,6 +78,25 @@ func (c *Config) WorktreePath(sessionName string) string {
 	return filepath.Join(root, sessionName)
 }
 
+func (c *Config) ConfigPath() string {
+	return filepath.Join(c.configDir, "config.json")
+}
+
+// Save writes the config to disk
+func (c *Config) Save() error {
+	data, err := json.MarshalIndent(c, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(c.ConfigPath(), data, 0644)
+}
+
+// ConfigExists returns true if config.json exists
+func (c *Config) ConfigExists() bool {
+	_, err := os.Stat(c.ConfigPath())
+	return err == nil
+}
+
 func (c *Config) ensureNamepool() error {
 	path := c.NamepoolPath()
 	if _, err := os.Stat(path); os.IsNotExist(err) {
