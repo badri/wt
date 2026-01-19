@@ -14,6 +14,16 @@ type BeadInfo struct {
 	Project string `json:"project"`
 }
 
+// ReadyBead represents a bead returned by bd ready
+type ReadyBead struct {
+	ID          string `json:"id"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	Status      string `json:"status"`
+	Priority    int    `json:"priority"`
+	IssueType   string `json:"issue_type"`
+}
+
 func Show(beadID string) (*BeadInfo, error) {
 	// Run bd show to get bead info
 	cmd := exec.Command("bd", "show", beadID, "--json")
@@ -93,4 +103,25 @@ func extractProject(beadID string) string {
 		return strings.Join(parts[:len(parts)-1], "-")
 	}
 	return beadID
+}
+
+// ExtractProject exports the project extraction for use by other packages
+func ExtractProject(beadID string) string {
+	return extractProject(beadID)
+}
+
+// Ready returns all beads that are ready to work on (no blockers)
+func Ready() ([]ReadyBead, error) {
+	cmd := exec.Command("bd", "ready", "--json")
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("getting ready beads: %w", err)
+	}
+
+	var beads []ReadyBead
+	if err := json.Unmarshal(output, &beads); err != nil {
+		return nil, fmt.Errorf("parsing ready beads: %w", err)
+	}
+
+	return beads, nil
 }

@@ -54,6 +54,12 @@ func run() error {
 		return cmdClose(cfg, args[1])
 	case "projects":
 		return cmdProjects(cfg)
+	case "ready":
+		var projectFilter string
+		if len(args) > 1 {
+			projectFilter = args[1]
+		}
+		return cmdReady(cfg, projectFilter)
 	case "project":
 		if len(args) < 2 {
 			return fmt.Errorf("usage: wt project <add|config> ...")
@@ -512,6 +518,65 @@ func cmdProjects(cfg *config.Config) error {
 
 	fmt.Println("│                                                                         │")
 	fmt.Println("└─────────────────────────────────────────────────────────────────────────┘")
+
+	return nil
+}
+
+func cmdReady(cfg *config.Config, projectFilter string) error {
+	beads, err := bead.Ready()
+	if err != nil {
+		return err
+	}
+
+	// Filter by project if specified
+	if projectFilter != "" {
+		var filtered []bead.ReadyBead
+		for _, b := range beads {
+			beadProject := bead.ExtractProject(b.ID)
+			if beadProject == projectFilter {
+				filtered = append(filtered, b)
+			}
+		}
+		beads = filtered
+	}
+
+	if len(beads) == 0 {
+		if projectFilter != "" {
+			fmt.Printf("No ready beads for project '%s'.\n", projectFilter)
+		} else {
+			fmt.Println("No ready beads.")
+		}
+		fmt.Println("\nAll caught up!")
+		return nil
+	}
+
+	title := "Ready Work"
+	if projectFilter != "" {
+		title = fmt.Sprintf("Ready Work (%s)", projectFilter)
+	}
+
+	fmt.Printf("┌─ %s ", title)
+	padding := 71 - len(title) - 4
+	for i := 0; i < padding; i++ {
+		fmt.Print("─")
+	}
+	fmt.Println("┐")
+	fmt.Println("│                                                                       │")
+	fmt.Printf("│  %-12s %-40s %-6s %-8s │\n", "Bead", "Title", "Type", "Priority")
+	fmt.Printf("│  %-12s %-40s %-6s %-8s │\n", "────", "─────", "────", "────────")
+
+	for _, b := range beads {
+		priority := fmt.Sprintf("P%d", b.Priority)
+		fmt.Printf("│  %-12s %-40s %-6s %-8s │\n",
+			truncate(b.ID, 12),
+			truncate(b.Title, 40),
+			truncate(b.IssueType, 6),
+			priority)
+	}
+
+	fmt.Println("│                                                                       │")
+	fmt.Println("└───────────────────────────────────────────────────────────────────────┘")
+	fmt.Printf("\n%d bead(s) ready. Start with: wt new <bead>\n", len(beads))
 
 	return nil
 }
