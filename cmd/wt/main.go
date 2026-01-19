@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"time"
 
+	"github.com/badri/wt/internal/auto"
 	"github.com/badri/wt/internal/bead"
 	"github.com/badri/wt/internal/config"
 	"github.com/badri/wt/internal/events"
@@ -88,6 +89,8 @@ func run() error {
 			return fmt.Errorf("usage: wt project <add|config|remove> ...")
 		}
 		return cmdProject(cfg, args[1:])
+	case "auto":
+		return cmdAuto(cfg, args[1:])
 	default:
 		// Assume it's a session name or bead ID to switch to
 		return cmdSwitch(cfg, args[0])
@@ -1451,4 +1454,43 @@ func cmdBeads(cfg *config.Config, projectName string, flags beadsFlags) error {
 	fmt.Printf("\n%d bead(s) found.\n", len(beads))
 
 	return nil
+}
+
+// cmdAuto runs autonomous batch processing of ready beads
+func cmdAuto(cfg *config.Config, args []string) error {
+	opts := parseAutoFlags(args)
+	runner := auto.NewRunner(cfg, opts)
+	return runner.Run()
+}
+
+func parseAutoFlags(args []string) *auto.Options {
+	opts := &auto.Options{}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--project", "-p":
+			if i+1 < len(args) {
+				opts.Project = args[i+1]
+				i++
+			}
+		case "--merge-mode", "-m":
+			if i+1 < len(args) {
+				opts.MergeMode = args[i+1]
+				i++
+			}
+		case "--timeout", "-t":
+			if i+1 < len(args) {
+				fmt.Sscanf(args[i+1], "%d", &opts.Timeout)
+				i++
+			}
+		case "--dry-run":
+			opts.DryRun = true
+		case "--check":
+			opts.Check = true
+		case "--stop":
+			opts.Stop = true
+		case "--force":
+			opts.Force = true
+		}
+	}
+	return opts
 }

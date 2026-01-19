@@ -127,8 +127,15 @@ func Ready() ([]ReadyBead, error) {
 }
 
 // ReadyInDir returns ready beads from a specific beads directory
+// beadsDir should be the path to the .beads directory (e.g., /path/to/project/.beads)
 func ReadyInDir(beadsDir string) ([]ReadyBead, error) {
-	cmd := exec.Command("bd", "--db", beadsDir, "ready", "--json")
+	// bd expects to run from the project directory containing .beads/
+	// Extract project dir from beadsDir (remove .beads suffix)
+	projectDir := strings.TrimSuffix(beadsDir, "/.beads")
+	projectDir = strings.TrimSuffix(projectDir, ".beads")
+
+	cmd := exec.Command("bd", "ready", "--json")
+	cmd.Dir = projectDir
 	output, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("getting ready beads from %s: %w", beadsDir, err)
@@ -144,7 +151,11 @@ func ReadyInDir(beadsDir string) ([]ReadyBead, error) {
 
 // CreateInDir creates a bead in a specific beads directory
 func CreateInDir(beadsDir, title string, opts *CreateOptions) (string, error) {
-	args := []string{"--db", beadsDir, "create", title}
+	// bd expects to run from the project directory containing .beads/
+	projectDir := strings.TrimSuffix(beadsDir, "/.beads")
+	projectDir = strings.TrimSuffix(projectDir, ".beads")
+
+	args := []string{"create", title}
 
 	if opts != nil {
 		if opts.Description != "" {
@@ -159,6 +170,7 @@ func CreateInDir(beadsDir, title string, opts *CreateOptions) (string, error) {
 	}
 
 	cmd := exec.Command("bd", args...)
+	cmd.Dir = projectDir
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("creating bead: %s: %w", string(output), err)
@@ -188,12 +200,17 @@ type CreateOptions struct {
 
 // ListInDir returns all beads from a specific beads directory
 func ListInDir(beadsDir string, status string) ([]ReadyBead, error) {
-	args := []string{"--db", beadsDir, "list", "--json"}
+	// bd expects to run from the project directory containing .beads/
+	projectDir := strings.TrimSuffix(beadsDir, "/.beads")
+	projectDir = strings.TrimSuffix(projectDir, ".beads")
+
+	args := []string{"list", "--json"}
 	if status != "" {
 		args = append(args, "--status", status)
 	}
 
 	cmd := exec.Command("bd", args...)
+	cmd.Dir = projectDir
 	output, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("listing beads from %s: %w", beadsDir, err)
