@@ -3,10 +3,12 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
 
 	"github.com/badri/wt/internal/bead"
 	"github.com/badri/wt/internal/config"
 	"github.com/badri/wt/internal/namepool"
+	"github.com/badri/wt/internal/project"
 	"github.com/badri/wt/internal/session"
 	"github.com/badri/wt/internal/tmux"
 	"github.com/badri/wt/internal/worktree"
@@ -48,6 +50,13 @@ func run() error {
 			return fmt.Errorf("usage: wt close <name>")
 		}
 		return cmdClose(cfg, args[1])
+	case "projects":
+		return cmdProjects(cfg)
+	case "project":
+		if len(args) < 2 {
+			return fmt.Errorf("usage: wt project <add|config> ...")
+		}
+		return cmdProject(cfg, args[1:])
 	default:
 		// Assume it's a session name or bead ID to switch to
 		return cmdSwitch(cfg, args[0])
@@ -160,10 +169,20 @@ func cmdNew(cfg *config.Config, args []string) error {
 
 	// Determine source repo
 	repoPath := flags.repo
+	var proj *project.Project
+	mgr := project.NewManager(cfg)
+
 	if repoPath == "" {
-		repoPath, err = worktree.FindGitRoot()
-		if err != nil {
-			return fmt.Errorf("not in a git repository. Use --repo <path> to specify the source repo")
+		// Try to find project by bead prefix
+		proj, _ = mgr.FindByBeadPrefix(beadID)
+		if proj != nil {
+			repoPath = proj.RepoPath()
+		} else {
+			// Fall back to current directory
+			repoPath, err = worktree.FindGitRoot()
+			if err != nil {
+				return fmt.Errorf("not in a git repository and no project registered for bead prefix. Use --repo <path> or register a project")
+			}
 		}
 	}
 
@@ -199,10 +218,16 @@ func cmdNew(cfg *config.Config, args []string) error {
 		return fmt.Errorf("creating tmux session: %w", err)
 	}
 
+	// Determine project name
+	projectName := beadInfo.Project
+	if proj != nil {
+		projectName = proj.Name
+	}
+
 	// Save session state
 	sess := &session.Session{
 		Bead:      beadID,
-		Project:   beadInfo.Project,
+		Project:   projectName,
 		Worktree:  worktreePath,
 		Branch:    beadID,
 		BeadsDir:  beadsDir,
@@ -343,4 +368,125 @@ func formatDuration(t string) string {
 	}
 	// TODO: Parse time and format as "2m ago", "1h ago", etc.
 	return "recently"
+}
+
+func cmdProjects(cfg *config.Config) error {
+	mgr := project.NewManager(cfg)
+	projects, err := mgr.List()
+	if err != nil {
+		return err
+	}
+
+	if len(projects) == 0 {
+		fmt.Println("No projects registered.")
+		fmt.Println("\nRegister a project: wt project add <name> <path>")
+		return nil
+	}
+
+	// Count active sessions per project
+	state, _ := session.LoadState(cfg)
+	sessionCount := make(map[string]int)
+	for _, sess := range state.Sessions {
+		sessionCount[sess.Project]++
+	}
+
+	fmt.Println("┌─ Projects ──────────────────────────────────────────────────────────────┐")
+	fmt.Println("│                                                                         │")
+	fmt.Printf("│  %-14s %-24s %-12s %-16s │\n", "Name", "Repo", "Merge Mode", "Active Sessions")
+	fmt.Printf("│  %-14s %-24s %-12s %-16s │\n", "────", "────", "──────────", "───────────────")
+
+	for _, proj := range projects {
+		count := sessionCount[proj.Name]
+		countStr := fmt.Sprintf("%d", count)
+		if count == 0 {
+			countStr = "-"
+		}
+		fmt.Printf("│  %-14s %-24s %-12s %-16s │\n",
+			truncate(proj.Name, 14),
+			truncate(proj.Repo, 24),
+			proj.MergeMode,
+			countStr)
+	}
+
+	fmt.Println("│                                                                         │")
+	fmt.Println("└─────────────────────────────────────────────────────────────────────────┘")
+
+	return nil
+}
+
+func cmdProject(cfg *config.Config, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: wt project <add|config> ...")
+	}
+
+	mgr := project.NewManager(cfg)
+
+	switch args[0] {
+	case "add":
+		if len(args) < 3 {
+			return fmt.Errorf("usage: wt project add <name> <path>")
+		}
+		return cmdProjectAdd(mgr, args[1], args[2])
+	case "config":
+		if len(args) < 2 {
+			return fmt.Errorf("usage: wt project config <name>")
+		}
+		return cmdProjectConfig(mgr, args[1])
+	case "remove", "rm":
+		if len(args) < 2 {
+			return fmt.Errorf("usage: wt project remove <name>")
+		}
+		return cmdProjectRemove(mgr, args[1])
+	default:
+		return fmt.Errorf("unknown project command: %s", args[0])
+	}
+}
+
+func cmdProjectAdd(mgr *project.Manager, name, path string) error {
+	proj, err := mgr.Add(name, path)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("Project '%s' registered.\n", proj.Name)
+	fmt.Printf("  Repo:         %s\n", proj.Repo)
+	fmt.Printf("  Beads prefix: %s\n", proj.BeadsPrefix)
+	fmt.Printf("  Merge mode:   %s (default)\n", proj.MergeMode)
+	fmt.Printf("\nConfigure with: wt project config %s\n", proj.Name)
+
+	return nil
+}
+
+func cmdProjectConfig(mgr *project.Manager, name string) error {
+	// Check project exists
+	if _, err := mgr.Get(name); err != nil {
+		return err
+	}
+
+	configPath := mgr.ConfigPath(name)
+
+	// Get editor from environment
+	editor := os.Getenv("EDITOR")
+	if editor == "" {
+		editor = os.Getenv("VISUAL")
+	}
+	if editor == "" {
+		editor = "vi"
+	}
+
+	cmd := exec.Command(editor, configPath)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	return cmd.Run()
+}
+
+func cmdProjectRemove(mgr *project.Manager, name string) error {
+	if err := mgr.Delete(name); err != nil {
+		return err
+	}
+
+	fmt.Printf("Project '%s' removed.\n", name)
+	return nil
 }
