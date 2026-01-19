@@ -100,6 +100,10 @@ func run() error {
 		return cmdEvents(cfg, args[1:])
 	case "doctor":
 		return doctor.Run(cfg)
+	case "pick":
+		return cmdPick(cfg)
+	case "keys":
+		return cmdKeys()
 	default:
 		// Assume it's a session name or bead ID to switch to
 		return cmdSwitch(cfg, args[0])
@@ -1663,4 +1667,132 @@ func parseDuration(s string) (time.Duration, error) {
 
 	// Handle "5m" style without explicit unit parsing issues
 	return time.ParseDuration(s)
+}
+
+// pickerEntry represents a session for the picker UI
+type pickerEntry struct {
+	name    string
+	bead    string
+	project string
+}
+
+// cmdPick provides an interactive session picker
+func cmdPick(cfg *config.Config) error {
+	state, err := session.LoadState(cfg)
+	if err != nil {
+		return err
+	}
+
+	if len(state.Sessions) == 0 {
+		fmt.Println("No active sessions.")
+		return nil
+	}
+
+	// Build list of sessions
+	var entries []pickerEntry
+	for name, sess := range state.Sessions {
+		entries = append(entries, pickerEntry{
+			name:    name,
+			bead:    sess.Bead,
+			project: sess.Project,
+		})
+	}
+
+	// Try fzf first
+	if hasFzf() {
+		return pickWithFzf(entries)
+	}
+
+	// Fall back to simple numbered selection
+	return pickWithPrompt(entries)
+}
+
+// hasFzf checks if fzf is available
+func hasFzf() bool {
+	_, err := exec.LookPath("fzf")
+	return err == nil
+}
+
+// pickWithFzf uses fzf for selection
+func pickWithFzf(entries []pickerEntry) error {
+	// Build input for fzf
+	var input strings.Builder
+	for _, e := range entries {
+		fmt.Fprintf(&input, "%s\t%s\t%s\n", e.name, e.bead, e.project)
+	}
+
+	cmd := exec.Command("fzf",
+		"--height=40%",
+		"--reverse",
+		"--header=Select session (name / bead / project)",
+		"--delimiter=\t",
+		"--with-nth=1,2,3",
+	)
+	cmd.Stdin = strings.NewReader(input.String())
+	cmd.Stderr = os.Stderr
+
+	output, err := cmd.Output()
+	if err != nil {
+		// User cancelled (Ctrl+C)
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 130 {
+			return nil
+		}
+		return err
+	}
+
+	// Parse selection - first field is the session name
+	selected := strings.TrimSpace(string(output))
+	if selected == "" {
+		return nil
+	}
+
+	parts := strings.Split(selected, "\t")
+	if len(parts) > 0 {
+		return tmux.Attach(parts[0])
+	}
+	return nil
+}
+
+// pickWithPrompt uses simple numbered selection
+func pickWithPrompt(entries []pickerEntry) error {
+	fmt.Println("Select a session:")
+	fmt.Println()
+	for i, e := range entries {
+		fmt.Printf("  [%d] %s  (%s, %s)\n", i+1, e.name, e.bead, e.project)
+	}
+	fmt.Println()
+	fmt.Print("Enter number: ")
+
+	var choice int
+	_, err := fmt.Scanf("%d", &choice)
+	if err != nil {
+		return fmt.Errorf("invalid selection")
+	}
+
+	if choice < 1 || choice > len(entries) {
+		return fmt.Errorf("selection out of range")
+	}
+
+	return tmux.Attach(entries[choice-1].name)
+}
+
+// cmdKeys outputs tmux keybinding configuration
+func cmdKeys() error {
+	keybindings := `# wt tmux keybindings
+# Add these to your ~/.tmux.conf
+
+# C-b s - Pick wt session with fzf in popup (requires tmux 3.2+)
+bind-key s display-popup -E "wt pick"
+
+# Alternative: use new-window if popup not available (tmux < 3.2)
+# bind-key s new-window "wt pick"
+
+# Keep C-b S for the default tmux session chooser
+bind-key S choose-tree -s
+
+# Reload tmux config after adding:
+#   tmux source-file ~/.tmux.conf
+`
+	fmt.Print(keybindings)
+	return nil
 }
