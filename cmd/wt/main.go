@@ -4,12 +4,14 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"time"
 
 	"github.com/badri/wt/internal/bead"
 	"github.com/badri/wt/internal/config"
 	"github.com/badri/wt/internal/namepool"
 	"github.com/badri/wt/internal/project"
 	"github.com/badri/wt/internal/session"
+	"github.com/badri/wt/internal/testenv"
 	"github.com/badri/wt/internal/tmux"
 	"github.com/badri/wt/internal/worktree"
 )
@@ -210,12 +212,53 @@ func cmdNew(cfg *config.Config, args []string) error {
 	// Determine BEADS_DIR (main repo's .beads)
 	beadsDir := repoPath + "/.beads"
 
+	// Allocate port offset if test env is configured
+	var portOffset int
+	var portEnv string
+	if proj != nil && proj.TestEnv != nil {
+		usedOffsets := collectUsedOffsets(state)
+		portOffset = testenv.AllocatePortOffset(proj, usedOffsets)
+		portEnv = proj.TestEnv.PortEnv
+		if portEnv == "" {
+			portEnv = "PORT_OFFSET"
+		}
+		fmt.Printf("Allocated %s=%d\n", portEnv, portOffset)
+	}
+
 	// Create tmux session
 	fmt.Printf("Creating tmux session '%s'...\n", sessionName)
-	if err := tmux.NewSession(sessionName, worktreePath, beadsDir, cfg.EditorCmd); err != nil {
+	tmuxOpts := &tmux.SessionOptions{
+		PortOffset: portOffset,
+		PortEnv:    portEnv,
+	}
+	if err := tmux.NewSession(sessionName, worktreePath, beadsDir, cfg.EditorCmd, tmuxOpts); err != nil {
 		// Cleanup worktree on failure
 		worktree.Remove(worktreePath)
 		return fmt.Errorf("creating tmux session: %w", err)
+	}
+
+	// Run test env setup if configured
+	if proj != nil && proj.TestEnv != nil && proj.TestEnv.Setup != "" {
+		fmt.Println("Running test environment setup...")
+		if err := testenv.RunSetup(proj, worktreePath, portOffset); err != nil {
+			fmt.Printf("Warning: test env setup failed: %v\n", err)
+		}
+
+		// Wait for health check if configured
+		if proj.TestEnv.HealthCheck != "" {
+			fmt.Println("Waiting for test environment to be ready...")
+			if err := testenv.WaitForHealthy(proj, worktreePath, portOffset, 30*time.Second); err != nil {
+				fmt.Printf("Warning: health check failed: %v\n", err)
+			}
+		}
+	}
+
+	// Run on_create hooks if configured
+	if proj != nil && proj.Hooks != nil && len(proj.Hooks.OnCreate) > 0 {
+		fmt.Println("Running on_create hooks...")
+		if err := testenv.RunOnCreateHooks(proj, worktreePath, portOffset, portEnv); err != nil {
+			fmt.Printf("Warning: on_create hook failed: %v\n", err)
+		}
 	}
 
 	// Determine project name
@@ -226,13 +269,14 @@ func cmdNew(cfg *config.Config, args []string) error {
 
 	// Save session state
 	sess := &session.Session{
-		Bead:      beadID,
-		Project:   projectName,
-		Worktree:  worktreePath,
-		Branch:    beadID,
-		BeadsDir:  beadsDir,
-		Status:    "working",
-		CreatedAt: session.Now(),
+		Bead:       beadID,
+		Project:    projectName,
+		Worktree:   worktreePath,
+		Branch:     beadID,
+		PortOffset: portOffset,
+		BeadsDir:   beadsDir,
+		Status:     "working",
+		CreatedAt:  session.Now(),
 	}
 	sess.UpdateActivity()
 
@@ -289,6 +333,30 @@ func cmdKill(cfg *config.Config, name string, flags killFlags) error {
 
 	fmt.Printf("Killing session '%s'...\n", name)
 
+	// Run teardown hooks if configured
+	mgr := project.NewManager(cfg)
+	if proj, _ := mgr.Get(sess.Project); proj != nil {
+		// Run test env teardown
+		if proj.TestEnv != nil && proj.TestEnv.Teardown != "" {
+			fmt.Println("  Running test environment teardown...")
+			if err := testenv.RunTeardown(proj, sess.Worktree, sess.PortOffset); err != nil {
+				fmt.Printf("  Warning: teardown failed: %v\n", err)
+			}
+		}
+
+		// Run on_close hooks
+		if proj.Hooks != nil && len(proj.Hooks.OnClose) > 0 {
+			fmt.Println("  Running on_close hooks...")
+			portEnv := ""
+			if proj.TestEnv != nil {
+				portEnv = proj.TestEnv.PortEnv
+			}
+			if err := testenv.RunOnCloseHooks(proj, sess.Worktree, sess.PortOffset, portEnv); err != nil {
+				fmt.Printf("  Warning: on_close hook failed: %v\n", err)
+			}
+		}
+	}
+
 	// Kill tmux session
 	fmt.Println("  Terminating tmux session...")
 	if err := tmux.Kill(name); err != nil {
@@ -326,6 +394,30 @@ func cmdClose(cfg *config.Config, name string) error {
 
 	fmt.Printf("Closing session '%s'...\n", name)
 	fmt.Printf("  Bead: %s\n", sess.Bead)
+
+	// Run teardown hooks if configured
+	mgr := project.NewManager(cfg)
+	if proj, _ := mgr.Get(sess.Project); proj != nil {
+		// Run test env teardown
+		if proj.TestEnv != nil && proj.TestEnv.Teardown != "" {
+			fmt.Println("  Running test environment teardown...")
+			if err := testenv.RunTeardown(proj, sess.Worktree, sess.PortOffset); err != nil {
+				fmt.Printf("  Warning: teardown failed: %v\n", err)
+			}
+		}
+
+		// Run on_close hooks
+		if proj.Hooks != nil && len(proj.Hooks.OnClose) > 0 {
+			fmt.Println("  Running on_close hooks...")
+			portEnv := ""
+			if proj.TestEnv != nil {
+				portEnv = proj.TestEnv.PortEnv
+			}
+			if err := testenv.RunOnCloseHooks(proj, sess.Worktree, sess.PortOffset, portEnv); err != nil {
+				fmt.Printf("  Warning: on_close hook failed: %v\n", err)
+			}
+		}
+	}
 
 	// Close the bead
 	fmt.Println("\n  Closing bead...")
@@ -368,6 +460,16 @@ func formatDuration(t string) string {
 	}
 	// TODO: Parse time and format as "2m ago", "1h ago", etc.
 	return "recently"
+}
+
+func collectUsedOffsets(state *session.State) []int {
+	var offsets []int
+	for _, sess := range state.Sessions {
+		if sess.PortOffset > 0 {
+			offsets = append(offsets, sess.PortOffset)
+		}
+	}
+	return offsets
 }
 
 func cmdProjects(cfg *config.Config) error {

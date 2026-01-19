@@ -17,10 +17,12 @@ type MockRunner struct {
 
 // MockSession represents a mock tmux session.
 type MockSession struct {
-	Name      string
-	Workdir   string
-	BeadsDir  string
-	EditorCmd string
+	Name       string
+	Workdir    string
+	BeadsDir   string
+	EditorCmd  string
+	PortOffset int
+	PortEnv    string
 }
 
 // NewMockRunner creates a new MockRunner with an empty session map.
@@ -30,7 +32,7 @@ func NewMockRunner() *MockRunner {
 	}
 }
 
-func (m *MockRunner) NewSession(name, workdir, beadsDir, editorCmd string) error {
+func (m *MockRunner) NewSession(name, workdir, beadsDir, editorCmd string, opts *SessionOptions) error {
 	if m.NewSessionErr != nil {
 		return m.NewSessionErr
 	}
@@ -39,12 +41,17 @@ func (m *MockRunner) NewSession(name, workdir, beadsDir, editorCmd string) error
 		return fmt.Errorf("tmux session '%s' already exists", name)
 	}
 
-	m.Sessions[name] = MockSession{
+	sess := MockSession{
 		Name:      name,
 		Workdir:   workdir,
 		BeadsDir:  beadsDir,
 		EditorCmd: editorCmd,
 	}
+	if opts != nil {
+		sess.PortOffset = opts.PortOffset
+		sess.PortEnv = opts.PortEnv
+	}
+	m.Sessions[name] = sess
 	return nil
 }
 

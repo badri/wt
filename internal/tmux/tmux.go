@@ -7,7 +7,13 @@ import (
 	"strings"
 )
 
-func NewSession(name, workdir, beadsDir, editorCmd string) error {
+// SessionOptions contains optional configuration for creating a tmux session.
+type SessionOptions struct {
+	PortOffset int
+	PortEnv    string // defaults to PORT_OFFSET if empty
+}
+
+func NewSession(name, workdir, beadsDir, editorCmd string, opts *SessionOptions) error {
 	// Check if session already exists
 	if SessionExists(name) {
 		return fmt.Errorf("tmux session '%s' already exists", name)
@@ -31,6 +37,18 @@ func NewSession(name, workdir, beadsDir, editorCmd string) error {
 	if err := setEnvCmd.Run(); err != nil {
 		// Non-fatal, but log it
 		fmt.Printf("Warning: could not set BEADS_DIR in tmux session: %v\n", err)
+	}
+
+	// Set PORT_OFFSET if configured
+	if opts != nil && opts.PortOffset > 0 {
+		portEnv := opts.PortEnv
+		if portEnv == "" {
+			portEnv = "PORT_OFFSET"
+		}
+		setPortCmd := exec.Command("tmux", "set-environment", "-t", name, portEnv, fmt.Sprintf("%d", opts.PortOffset))
+		if err := setPortCmd.Run(); err != nil {
+			fmt.Printf("Warning: could not set %s in tmux session: %v\n", portEnv, err)
+		}
 	}
 
 	// Send the editor command to start

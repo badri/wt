@@ -8,7 +8,7 @@ import (
 func TestMockRunner_NewSession(t *testing.T) {
 	mock := NewMockRunner()
 
-	err := mock.NewSession("test", "/tmp/workdir", "/tmp/beads", "claude")
+	err := mock.NewSession("test", "/tmp/workdir", "/tmp/beads", "claude", nil)
 	if err != nil {
 		t.Fatalf("NewSession failed: %v", err)
 	}
@@ -26,11 +26,29 @@ func TestMockRunner_NewSession(t *testing.T) {
 	}
 }
 
+func TestMockRunner_NewSession_WithPortOffset(t *testing.T) {
+	mock := NewMockRunner()
+
+	opts := &SessionOptions{PortOffset: 1000, PortEnv: "TEST_PORT"}
+	err := mock.NewSession("test", "/tmp/workdir", "/tmp/beads", "claude", opts)
+	if err != nil {
+		t.Fatalf("NewSession failed: %v", err)
+	}
+
+	sess := mock.Sessions["test"]
+	if sess.PortOffset != 1000 {
+		t.Errorf("expected PortOffset 1000, got %d", sess.PortOffset)
+	}
+	if sess.PortEnv != "TEST_PORT" {
+		t.Errorf("expected PortEnv 'TEST_PORT', got %q", sess.PortEnv)
+	}
+}
+
 func TestMockRunner_NewSession_DuplicateError(t *testing.T) {
 	mock := NewMockRunner()
 
-	mock.NewSession("test", "/tmp", "/tmp", "")
-	err := mock.NewSession("test", "/tmp", "/tmp", "")
+	mock.NewSession("test", "/tmp", "/tmp", "", nil)
+	err := mock.NewSession("test", "/tmp", "/tmp", "", nil)
 
 	if err == nil {
 		t.Error("expected error for duplicate session")
@@ -41,7 +59,7 @@ func TestMockRunner_NewSession_ConfiguredError(t *testing.T) {
 	mock := NewMockRunner()
 	mock.NewSessionErr = errors.New("forced error")
 
-	err := mock.NewSession("test", "/tmp", "/tmp", "")
+	err := mock.NewSession("test", "/tmp", "/tmp", "", nil)
 	if err == nil {
 		t.Error("expected configured error")
 	}

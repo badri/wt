@@ -3,7 +3,7 @@ package tmux
 // Runner defines the interface for tmux operations.
 // This allows mocking in tests.
 type Runner interface {
-	NewSession(name, workdir, beadsDir, editorCmd string) error
+	NewSession(name, workdir, beadsDir, editorCmd string, opts *SessionOptions) error
 	Attach(name string) error
 	Kill(name string) error
 	SessionExists(name string) bool
@@ -13,8 +13,8 @@ type Runner interface {
 // DefaultRunner implements Runner using actual tmux commands.
 type DefaultRunner struct{}
 
-func (r *DefaultRunner) NewSession(name, workdir, beadsDir, editorCmd string) error {
-	return NewSession(name, workdir, beadsDir, editorCmd)
+func (r *DefaultRunner) NewSession(name, workdir, beadsDir, editorCmd string, opts *SessionOptions) error {
+	return NewSession(name, workdir, beadsDir, editorCmd, opts)
 }
 
 func (r *DefaultRunner) Attach(name string) error {

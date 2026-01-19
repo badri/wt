@@ -83,7 +83,7 @@ func TestIntegration_FullWorkflow(t *testing.T) {
 
 	// Create tmux session
 	t.Logf("Creating tmux session %s", sessionName)
-	if err := tmux.NewSession(sessionName, worktreePath, repoDir+"/.beads", ""); err != nil {
+	if err := tmux.NewSession(sessionName, worktreePath, repoDir+"/.beads", "", nil); err != nil {
 		t.Fatalf("failed to create tmux session: %v", err)
 	}
 
