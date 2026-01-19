@@ -619,7 +619,9 @@ Workers inherit `BEADS_DIR` from the project, so bd commands inside workers oper
 | Command | Description |
 |---------|-------------|
 | `wt` | List active sessions |
-| `wt new <bead>` | Spawn worker for bead |
+| `wt new <bead>` | Spawn worker for bead (stays in hub) |
+| `wt new <bead> --switch` | Spawn and switch to worker |
+| `wt new <bead> --no-test-env` | Spawn without test env setup |
 | `wt <name>` | Switch to session |
 | `wt watch` | Live monitoring |
 | `wt status` | Current session info (in worker) |
@@ -687,25 +689,30 @@ wt hub --kill --force       # Kill hub without confirmation
 # Start or attach to hub
 wt hub
 
-# From hub, spawn workers
-wt new project-abc --no-switch
-wt new project-xyz --no-switch
+# From hub, spawn workers (automatically stays in hub, workers start working)
+wt new wt-abc           # Creates wt-woody, sends initial prompt, stays in hub
+wt new supabyoi-xyz     # Creates supabyoi-buzz, starts working
 
 # Monitor workers
 wt watch
 
 # Switch to a worker to check on it
-wt toast              # Ctrl-b d to detach back to hub
+wt wt-woody             # Ctrl-b d to detach back to hub
 
 # When done, detach from hub
-wt hub --detach       # Returns to previous session
+wt hub --detach         # Returns to previous session
 ```
+
+**Key behaviors from hub:**
+- `wt new` stays in hub by default (use `--switch` to attach)
+- Workers auto-start with: "Work on bead X: Title. When done, create PR..."
+- Session names are project-prefixed: `wt-woody`, `supabyoi-buzz`
 
 ### Hub vs Worker Sessions
 
 | Aspect | Hub | Worker |
 |--------|-----|--------|
-| Session name | "hub" | Theme-based (toast, shadow, etc.) |
+| Session name | "hub" | Project-prefixed (wt-woody, etc.) |
 | Working dir | ~ | Worktree path |
 | Worktree | None | Yes, isolated |
 | BEADS_DIR | Not set | Set to project's .beads |
