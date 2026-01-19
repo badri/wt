@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/badri/wt/internal/config"
@@ -151,21 +152,44 @@ func (l *Logger) RecentSessions(n int) ([]Event, error) {
 	return sessions, nil
 }
 
-// FindSession finds a session by name in recent events
-func (l *Logger) FindSession(name string) (*Event, error) {
+// FindSession finds a session by name, bead ID, or project in recent events.
+// Matching priority: exact session name > bead ID > project prefix
+func (l *Logger) FindSession(query string) (*Event, error) {
 	events, err := l.Recent(1000)
 	if err != nil {
 		return nil, err
 	}
 
-	// Search from most recent
+	// Filter to session_end events with Claude session (can be resumed)
+	var sessions []Event
 	for i := len(events) - 1; i >= 0; i-- {
-		if events[i].Session == name && events[i].Type == EventSessionEnd {
-			return &events[i], nil
+		if events[i].Type == EventSessionEnd && events[i].ClaudeSession != "" {
+			sessions = append(sessions, events[i])
 		}
 	}
 
-	return nil, fmt.Errorf("session '%s' not found in history", name)
+	// 1. Exact session name match
+	for _, e := range sessions {
+		if e.Session == query {
+			return &e, nil
+		}
+	}
+
+	// 2. Bead ID match (exact or prefix)
+	for _, e := range sessions {
+		if e.Bead == query || strings.HasPrefix(e.Bead, query) {
+			return &e, nil
+		}
+	}
+
+	// 3. Project match
+	for _, e := range sessions {
+		if e.Project == query {
+			return &e, nil
+		}
+	}
+
+	return nil, fmt.Errorf("no session found matching '%s' (tried: session name, bead ID, project)", query)
 }
 
 // Since returns events from the last duration
