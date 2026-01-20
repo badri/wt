@@ -20,6 +20,49 @@ func cmdHub(cfg *config.Config, args []string) error {
 	return hub.Run(cfg, opts)
 }
 
+// cmdHubHelp shows detailed help for the hub command
+func cmdHubHelp() error {
+	help := `wt hub - Manage the hub orchestration session
+
+USAGE:
+    wt hub [options]
+
+DESCRIPTION:
+    The hub is a dedicated tmux session for orchestrating worker sessions.
+    It includes a watch pane showing live status of all workers.
+
+OPTIONS:
+    (none)              Create hub (with watch) or attach to existing hub
+    -w, --watch         Add watch pane when attaching to existing hub
+    --no-watch          Create hub without watch pane
+    -d, --detach        Detach from hub (return to previous session)
+    -s, --status        Show hub status without attaching
+    -k, --kill          Kill the hub session
+    -f, --force         Skip confirmation when killing
+    -h, --help          Show this help
+
+EXAMPLES:
+    wt hub                  Create or attach to hub
+    wt hub --no-watch       Create hub without watch pane
+    wt hub --watch          Attach and add watch pane if missing
+    wt hub --status         Check if hub is running
+    wt hub --kill           Terminate hub session
+    wt hub --detach         Switch back to previous session
+`
+	fmt.Print(help)
+	return nil
+}
+
+// hasHelpFlag checks if args contain -h or --help
+func hasHelpFlag(args []string) bool {
+	for _, arg := range args {
+		if arg == "-h" || arg == "--help" {
+			return true
+		}
+	}
+	return false
+}
+
 func parseHubFlags(args []string) *hub.Options {
 	opts := &hub.Options{}
 	for _, arg := range args {
@@ -39,6 +82,43 @@ func parseHubFlags(args []string) *hub.Options {
 		}
 	}
 	return opts
+}
+
+// cmdWatchHelp shows detailed help for the watch command
+func cmdWatchHelp() error {
+	help := `wt watch - Live dashboard of all worker sessions
+
+USAGE:
+    wt watch [options]
+
+DESCRIPTION:
+    Shows a real-time TUI dashboard displaying all active worker sessions
+    with their status, bead, project, and idle time.
+
+    When run from the hub session, the TUI runs directly.
+    When run from a worker session, it opens as a tmux popup overlay.
+
+KEYBOARD:
+    ↑/k, ↓/j           Navigate between sessions
+    Enter              Switch to selected session (watch keeps running)
+    r                  Refresh session list
+    q, Ctrl+C          Quit watch
+
+STATUS INDICATORS:
+    ● green            Working - actively processing
+    ● yellow           Idle - no recent activity
+    ● bright green     Ready - waiting for review
+    ● red              Blocked or Error
+
+OPTIONS:
+    -h, --help         Show this help
+
+EXAMPLES:
+    wt watch           Start the watch dashboard
+    wt hub --watch     Attach to hub and ensure watch pane exists
+`
+	fmt.Print(help)
+	return nil
 }
 
 // cmdWatch displays a live dashboard of all sessions using the TUI.

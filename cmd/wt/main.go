@@ -38,8 +38,8 @@ func run() error {
 
 	switch args[0] {
 	case "new":
-		if len(args) < 2 {
-			return fmt.Errorf("usage: wt new <bead-id> [--repo <path>] [--name <name>] [--no-switch] [--switch] [--no-test-env]")
+		if len(args) < 2 || hasHelpFlag(args[1:]) {
+			return cmdNewHelp()
 		}
 		return cmdNew(cfg, args[1:])
 	case "kill":
@@ -64,6 +64,9 @@ func run() error {
 	case "abandon":
 		return cmdAbandon(cfg)
 	case "watch":
+		if hasHelpFlag(args[1:]) {
+			return cmdWatchHelp()
+		}
 		return cmdWatch(cfg)
 	case "seance":
 		return cmdSeance(cfg, args[1:])
@@ -116,6 +119,9 @@ func run() error {
 	case "prime":
 		return cmdPrime(cfg, args[1:])
 	case "hub":
+		if hasHelpFlag(args[1:]) {
+			return cmdHubHelp()
+		}
 		return cmdHub(cfg, args[1:])
 	default:
 		// Assume it's a session name or bead ID to switch to

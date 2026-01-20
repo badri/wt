@@ -26,6 +26,38 @@ type newFlags struct {
 	noTestEnv   bool
 }
 
+// cmdNewHelp shows detailed help for the new command
+func cmdNewHelp() error {
+	help := `wt new - Create a new worker session for a bead
+
+USAGE:
+    wt new <bead-id> [options]
+
+DESCRIPTION:
+    Creates a git worktree, tmux session, and starts Claude Code
+    to work on the specified bead.
+
+ARGUMENTS:
+    <bead-id>           The bead ID to work on (e.g., wt-123, myproject-abc)
+
+OPTIONS:
+    --repo <path>       Use specific repository path (default: auto-detect from bead)
+    --name <name>       Custom session name (default: generated from namepool)
+    --no-switch         Don't switch to the new session after creation
+    --switch            Force switch even when running from hub
+    --no-test-env       Skip test environment setup
+    -h, --help          Show this help
+
+EXAMPLES:
+    wt new wt-123                     Start working on bead wt-123
+    wt new wt-123 --name mybranch     Use custom session name
+    wt new wt-123 --no-switch         Create but stay in current session
+    wt new proj-456 --repo ~/code/proj  Specify repo path
+`
+	fmt.Print(help)
+	return nil
+}
+
 func parseNewFlags(args []string) (beadID string, flags newFlags) {
 	beadID = args[0]
 	for i := 1; i < len(args); i++ {
