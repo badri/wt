@@ -19,7 +19,7 @@ func Notify(title, message string) error {
 }
 
 func notifyMacOS(title, message string) error {
-	script := `display notification "` + message + `" with title "` + title + `"`
+	script := `display notification "` + message + `" with title "` + title + `" sound name "default"`
 	cmd := exec.Command("osascript", "-e", script)
 	return cmd.Run()
 }
