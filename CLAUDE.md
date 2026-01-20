@@ -12,3 +12,22 @@
 3. **Integration Testing**:
    - Run integration tests after major changes (once implemented)
    - Integration tests should verify tmux, git worktree, and beads integration
+
+4. **When to Add Tests**:
+   - New public functions/APIs: Add unit tests
+   - Pure functions (no external deps): Always add unit tests
+   - Functions calling external commands (bd, tmux, git): Add tests that skip if command unavailable
+   - UI/display changes: Generally not unit tested unless there's complex logic
+   - Bug fixes: Add regression test if feasible
+
+5. **When to Update Docs** (docs/ directory):
+   - New commands or flags: Update relevant command reference
+   - New concepts: Add to concepts/ section
+   - Changed user-facing behavior: Update affected pages
+   - Internal refactors/plumbing: No docs update needed
+   - Bug fixes: No docs update unless it changes documented behavior
+
+6. **When to Update Skills**:
+   - New commands users should know about: Update skill description
+   - Changed command syntax: Update skill examples
+   - Internal improvements: No skill update needed
