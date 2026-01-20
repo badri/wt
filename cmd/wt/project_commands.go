@@ -11,6 +11,38 @@ import (
 	"github.com/badri/wt/internal/session"
 )
 
+// cmdProjectHelp shows detailed help for the project command
+func cmdProjectHelp() error {
+	help := `wt project - Manage registered projects
+
+USAGE:
+    wt project [command] [options]
+
+COMMANDS:
+    (none), list        List all registered projects
+    add <name> <path>   Register a new project
+    config <name>       Edit project configuration in editor
+    remove <name>       Unregister a project
+
+OPTIONS:
+    -h, --help          Show this help
+
+EXAMPLES:
+    wt project                      List all projects
+    wt project list                 Same as above
+    wt project add myproj ~/code/myproj    Register project
+    wt project config myproj        Edit myproj's configuration
+    wt project remove myproj        Unregister myproj
+
+SEE ALSO:
+    wt ready [project]     Show beads ready to work on
+    wt beads <project>     List all beads for a project
+    wt create <proj> <t>   Create a new bead in project
+`
+	fmt.Print(help)
+	return nil
+}
+
 func cmdProjects(cfg *config.Config) error {
 	mgr := project.NewManager(cfg)
 	projects, err := mgr.List()

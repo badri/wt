@@ -71,6 +71,7 @@ func run() error {
 	case "seance":
 		return cmdSeance(cfg, args[1:])
 	case "projects":
+		// Alias for backward compatibility
 		return cmdProjects(cfg)
 	case "ready":
 		var projectFilter string
@@ -89,8 +90,12 @@ func run() error {
 		}
 		return cmdBeads(cfg, args[1], parseBeadsFlags(args[2:]))
 	case "project":
-		if len(args) < 2 {
-			return fmt.Errorf("usage: wt project <add|config|remove> ...")
+		if len(args) < 2 || hasHelpFlag(args[1:]) {
+			return cmdProjectHelp()
+		}
+		// "wt project list" is same as "wt project" with no subcommand
+		if args[1] == "list" {
+			return cmdProjects(cfg)
 		}
 		return cmdProject(cfg, args[1:])
 	case "auto":
