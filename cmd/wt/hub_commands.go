@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"time"
 
+	"github.com/charmbracelet/bubbles/table"
+
 	"github.com/badri/wt/internal/config"
 	"github.com/badri/wt/internal/events"
 	"github.com/badri/wt/internal/handoff"
@@ -329,16 +331,21 @@ func cmdSeanceList(logger *events.Logger) error {
 	}
 
 	if len(sessions) == 0 {
-		fmt.Println("No past sessions found.")
-		fmt.Println("\nSessions are recorded when they end via 'wt done', 'wt close', or 'wt handoff'.")
+		printEmptyMessage("No past sessions found.", "Sessions are recorded when they end via 'wt done', 'wt close', or 'wt handoff'.")
 		return nil
 	}
 
-	fmt.Println("┌─ Past Sessions (seance) ─────────────────────────────────────────────┐")
-	fmt.Println("│                                                                       │")
-	fmt.Printf("│  %-10s %-18s %-12s %-24s │\n", "Session", "Bead", "Project", "Time")
-	fmt.Printf("│  %-10s %-18s %-12s %-24s │\n", "───────", "────", "───────", "────")
+	// Define columns
+	columns := []table.Column{
+		{Title: "", Width: 2},
+		{Title: "Session", Width: 10},
+		{Title: "Bead", Width: 18},
+		{Title: "Project", Width: 14},
+		{Title: "Time", Width: 16},
+	}
 
+	// Build rows
+	var rows []table.Row
 	for _, sess := range sessions {
 		t, _ := time.Parse(time.RFC3339, sess.Time)
 		timeStr := t.Format("2006-01-02 15:04")
@@ -361,21 +368,18 @@ func cmdSeanceList(logger *events.Logger) error {
 			projectDisplay = "(orchestrator)"
 		}
 
-		fmt.Printf("│  %s %-8s %-18s %-12s %-24s │\n",
+		rows = append(rows, table.Row{
 			icon,
-			truncate(sess.Session, 8),
+			truncate(sess.Session, 10),
 			truncate(beadDisplay, 18),
-			truncate(projectDisplay, 12),
-			timeStr)
+			truncate(projectDisplay, 14),
+			timeStr,
+		})
 	}
 
-	fmt.Println("│                                                                       │")
-	fmt.Println("└───────────────────────────────────────────────────────────────────────┘")
+	printTable("Past Sessions (seance)", columns, rows)
 	fmt.Println("\n💬 = Worker session   🏠 = Hub session")
-	fmt.Println("\nCommands:")
-	fmt.Println("  wt seance <name>           Resume conversation")
-	fmt.Println("  wt seance <name> -p 'msg'  One-shot query")
-	fmt.Println("  wt seance hub              Resume last hub session")
+	fmt.Println("\nCommands: wt seance <name> | wt seance <name> -p 'query' | wt seance hub")
 
 	return nil
 }

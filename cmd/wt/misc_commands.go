@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/table"
+
 	"github.com/badri/wt/internal/auto"
 	"github.com/badri/wt/internal/config"
 	"github.com/badri/wt/internal/events"
@@ -117,38 +119,65 @@ func cmdEvents(cfg *config.Config, args []string) error {
 	}
 
 	if len(evts) == 0 {
-		fmt.Println("No events found.")
+		printEmptyMessage("No events found.", "")
 		return nil
 	}
 
-	fmt.Println("Recent Events:")
-	fmt.Println("------------------------------------------------------------------------------")
-	for _, e := range evts {
-		printEvent(&e)
+	// Define columns
+	columns := []table.Column{
+		{Title: "Time", Width: 19},
+		{Title: "", Width: 1},
+		{Title: "Type", Width: 14},
+		{Title: "Project", Width: 12},
+		{Title: "Bead", Width: 18},
+		{Title: "Session", Width: 12},
 	}
 
+	// Build rows
+	var rows []table.Row
+	for _, e := range evts {
+		t, _ := time.Parse(time.RFC3339, e.Time)
+		timeStr := t.Format("2006-01-02 15:04:05")
+		icon := getEventIcon(e.Type)
+
+		rows = append(rows, table.Row{
+			timeStr,
+			icon,
+			string(e.Type),
+			truncate(e.Project, 12),
+			truncate(e.Bead, 18),
+			truncate(e.Session, 12),
+		})
+	}
+
+	printTable("Recent Events", columns, rows)
+
 	return nil
+}
+
+func getEventIcon(eventType events.EventType) string {
+	switch eventType {
+	case events.EventSessionStart:
+		return ">"
+	case events.EventSessionEnd:
+		return "#"
+	case events.EventSessionKill:
+		return "x"
+	case events.EventHubHandoff:
+		return "~"
+	case events.EventPRCreated:
+		return "^"
+	case events.EventPRMerged:
+		return "+"
+	default:
+		return "*"
+	}
 }
 
 func printEvent(e *events.Event) {
 	t, _ := time.Parse(time.RFC3339, e.Time)
 	timeStr := t.Format("2006-01-02 15:04:05")
-
-	icon := "*"
-	switch e.Type {
-	case events.EventSessionStart:
-		icon = ">"
-	case events.EventSessionEnd:
-		icon = "#"
-	case events.EventSessionKill:
-		icon = "x"
-	case events.EventHubHandoff:
-		icon = "~"
-	case events.EventPRCreated:
-		icon = "^"
-	case events.EventPRMerged:
-		icon = "+"
-	}
+	icon := getEventIcon(e.Type)
 
 	fmt.Printf("%s %s %-14s %-12s %-18s %s\n",
 		timeStr, icon, e.Type, e.Project, e.Bead, e.Session)
