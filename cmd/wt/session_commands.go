@@ -167,10 +167,10 @@ func cmdList(cfg *config.Config) error {
 
 	// Define columns
 	columns := []table.Column{
-		{Title: "Name", Width: 12},
+		{Title: "Name", Width: 18},
 		{Title: "Status", Width: 10},
-		{Title: "Title", Width: 32},
-		{Title: "Project", Width: 12},
+		{Title: "Title", Width: 36},
+		{Title: "Project", Width: 14},
 	}
 
 	// Build rows
@@ -190,8 +190,8 @@ func cmdList(cfg *config.Config) error {
 		rows = append(rows, table.Row{
 			name,
 			status,
-			truncate(title, 32),
-			truncate(sess.Project, 12),
+			truncate(title, 36),
+			truncate(sess.Project, 14),
 		})
 	}
 
