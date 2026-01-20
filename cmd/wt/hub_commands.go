@@ -14,6 +14,7 @@ import (
 	"github.com/badri/wt/internal/hub"
 	"github.com/badri/wt/internal/monitor"
 	"github.com/badri/wt/internal/session"
+	"github.com/badri/wt/internal/tmux"
 )
 
 // cmdHub creates or attaches to the dedicated hub session
@@ -131,14 +132,39 @@ func cmdWatch(cfg *config.Config) error {
 		return cmdWatchTUI(cfg)
 	}
 
+	// Not in tmux at all - run TUI directly
+	if os.Getenv("TMUX") == "" {
+		return cmdWatchTUI(cfg)
+	}
+
 	// Check if we're in the hub session
 	if hub.IsInHub() {
 		// In hub - run TUI directly
 		return cmdWatchTUI(cfg)
 	}
 
-	// In worker session - use tmux popup for overlay
-	return cmdWatchPopup()
+	// Check if we're in a wt worker session
+	state, err := session.LoadState(cfg)
+	if err != nil {
+		// Can't determine - run TUI directly
+		return cmdWatchTUI(cfg)
+	}
+
+	// Get current tmux session name
+	currentSession := tmux.CurrentSession()
+	if currentSession == "" {
+		// Not in a named session - run TUI directly
+		return cmdWatchTUI(cfg)
+	}
+
+	// Check if current session is a wt worker
+	if _, isWorker := state.Sessions[currentSession]; isWorker {
+		// In worker session - use tmux popup for overlay
+		return cmdWatchPopup()
+	}
+
+	// In some other tmux session (not wt-related) - run TUI directly
+	return cmdWatchTUI(cfg)
 }
 
 // cmdWatchPopup shows watch in a tmux popup overlay

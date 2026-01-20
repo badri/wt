@@ -203,6 +203,16 @@ func SessionExists(name string) bool {
 	return cmd.Run() == nil
 }
 
+// CurrentSession returns the name of the current tmux session, or empty string if not in tmux
+func CurrentSession() string {
+	cmd := exec.Command("tmux", "display-message", "-p", "#{session_name}")
+	output, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(output))
+}
+
 func ListSessions() ([]string, error) {
 	cmd := exec.Command("tmux", "list-sessions", "-F", "#{session_name}")
 	output, err := cmd.Output()
