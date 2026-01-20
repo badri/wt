@@ -117,6 +117,19 @@ func parseDoneFlags(args []string) doneFlags {
 	return flags
 }
 
+// SessionJSON is the JSON output format for a session
+type SessionJSON struct {
+	Name          string `json:"name"`
+	Bead          string `json:"bead"`
+	Project       string `json:"project"`
+	Worktree      string `json:"worktree"`
+	Branch        string `json:"branch"`
+	Status        string `json:"status"`
+	StatusMessage string `json:"status_message,omitempty"`
+	CreatedAt     string `json:"created_at"`
+	LastActivity  string `json:"last_activity"`
+}
+
 func cmdList(cfg *config.Config) error {
 	state, err := session.LoadState(cfg)
 	if err != nil {
@@ -125,6 +138,30 @@ func cmdList(cfg *config.Config) error {
 
 	if len(state.Sessions) == 0 {
 		printEmptyMessage("No active sessions.", "Commands: wt new <bead> | wt <name> (switch)")
+		return nil
+	}
+
+	// JSON output
+	if outputJSON {
+		var sessions []SessionJSON
+		for name, sess := range state.Sessions {
+			status := sess.Status
+			if status == "" {
+				status = "working"
+			}
+			sessions = append(sessions, SessionJSON{
+				Name:          name,
+				Bead:          sess.Bead,
+				Project:       sess.Project,
+				Worktree:      sess.Worktree,
+				Branch:        sess.Branch,
+				Status:        status,
+				StatusMessage: sess.StatusMessage,
+				CreatedAt:     sess.CreatedAt,
+				LastActivity:  sess.LastActivity,
+			})
+		}
+		printJSON(sessions)
 		return nil
 	}
 
@@ -750,6 +787,23 @@ func cmdAbandon(cfg *config.Config) error {
 	return nil
 }
 
+// StatusJSON is the JSON output format for session status
+type StatusJSON struct {
+	Session       string `json:"session"`
+	Bead          string `json:"bead"`
+	Title         string `json:"title"`
+	Project       string `json:"project"`
+	Branch        string `json:"branch"`
+	MergeMode     string `json:"merge_mode"`
+	Worktree      string `json:"worktree"`
+	Status        string `json:"status"`
+	StatusMessage string `json:"status_message,omitempty"`
+	HasChanges    bool   `json:"has_uncommitted_changes"`
+	PortOffset    int    `json:"port_offset,omitempty"`
+	CreatedAt     string `json:"created_at"`
+	LastActivity  string `json:"last_activity"`
+}
+
 // cmdStatus shows the status of the current session
 func cmdStatus(cfg *config.Config) error {
 	cwd, err := os.Getwd()
@@ -794,6 +848,32 @@ func cmdStatus(cfg *config.Config) error {
 	mergeMode := "pr-review"
 	if proj != nil && proj.MergeMode != "" {
 		mergeMode = proj.MergeMode
+	}
+
+	status := sess.Status
+	if status == "" {
+		status = "working"
+	}
+
+	// JSON output
+	if outputJSON {
+		result := StatusJSON{
+			Session:       sessionName,
+			Bead:          sess.Bead,
+			Title:         beadInfo.Title,
+			Project:       sess.Project,
+			Branch:        branch,
+			MergeMode:     mergeMode,
+			Worktree:      sess.Worktree,
+			Status:        status,
+			StatusMessage: sess.StatusMessage,
+			HasChanges:    hasChanges,
+			PortOffset:    sess.PortOffset,
+			CreatedAt:     sess.CreatedAt,
+			LastActivity:  sess.LastActivity,
+		}
+		printJSON(result)
+		return nil
 	}
 
 	fmt.Println("┌─ Session Status ─────────────────────────────────────────────────────┐")

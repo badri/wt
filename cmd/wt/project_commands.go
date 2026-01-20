@@ -209,6 +209,12 @@ func cmdReady(cfg *config.Config, projectFilter string) error {
 		return nil
 	}
 
+	// JSON output
+	if outputJSON {
+		printJSON(allBeads)
+		return nil
+	}
+
 	title := "Ready Work (all projects)"
 	if projectFilter != "" {
 		title = fmt.Sprintf("Ready Work (%s)", projectFilter)
@@ -344,6 +350,12 @@ func cmdBeads(cfg *config.Config, projectName string, flags beadsFlags) error {
 			statusMsg = fmt.Sprintf(" with status '%s'", flags.status)
 		}
 		printEmptyMessage(fmt.Sprintf("No beads%s in project '%s'.", statusMsg, projectName), "")
+		return nil
+	}
+
+	// JSON output
+	if outputJSON {
+		printJSON(beads)
 		return nil
 	}
 

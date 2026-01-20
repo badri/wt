@@ -16,6 +16,9 @@ var (
 	date    = "unknown"
 )
 
+// Global output format flag
+var outputJSON bool
+
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -30,6 +33,9 @@ func run() error {
 	}
 
 	args := os.Args[1:]
+
+	// Parse global --json flag
+	args = parseGlobalFlags(args)
 
 	// No args or "list" → list sessions
 	if len(args) == 0 || args[0] == "list" {
@@ -132,4 +138,17 @@ func run() error {
 		// Assume it's a session name or bead ID to switch to
 		return cmdSwitch(cfg, args[0])
 	}
+}
+
+// parseGlobalFlags extracts global flags like --json from args
+func parseGlobalFlags(args []string) []string {
+	var filtered []string
+	for _, arg := range args {
+		if arg == "--json" {
+			outputJSON = true
+		} else {
+			filtered = append(filtered, arg)
+		}
+	}
+	return filtered
 }

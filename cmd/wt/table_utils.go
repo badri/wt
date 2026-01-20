@@ -1,7 +1,9 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
 
 	"github.com/charmbracelet/bubbles/table"
 	"github.com/charmbracelet/lipgloss"
@@ -57,8 +59,19 @@ func printTable(title string, columns []table.Column, rows []table.Row) {
 
 // printEmptyMessage prints a styled empty state message
 func printEmptyMessage(message, hint string) {
+	if outputJSON {
+		printJSON([]interface{}{})
+		return
+	}
 	fmt.Println(tableDimStyle.Render(message))
 	if hint != "" {
 		fmt.Println(tableDimStyle.Render("\n" + hint))
 	}
+}
+
+// printJSON outputs data as formatted JSON
+func printJSON(data interface{}) {
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	enc.Encode(data)
 }
