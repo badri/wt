@@ -87,6 +87,7 @@ Hub Session Start:
 ```bash
 wt              # List all active sessions
 wt list         # Same as above
+wt list --json  # JSON output for scripting/LLM consumption
 ```
 
 Output shows: name, bead, status (working/idle/error), last activity, title
@@ -146,6 +147,7 @@ wt watch            # Interactive TUI dashboard
 
 ```bash
 wt status           # Current session info (from inside worker)
+wt status --json    # JSON output for scripting/LLM consumption
 ```
 
 Shows: session name, bead, project, worktree path, branch, port offset, status
@@ -155,6 +157,7 @@ Shows: session name, bead, project, worktree path, branch, port offset, status
 ```bash
 wt ready                    # All registered projects (aggregated)
 wt ready <project>          # Specific project only
+wt ready --json             # JSON output for scripting/LLM consumption
 ```
 
 Lists beads ready for work (no blockers, not in progress).
@@ -191,6 +194,7 @@ wt create myapp "Fix auth bug" -d "Token refresh fails on timeout" -t bug
 ```bash
 wt beads <project>                    # All beads
 wt beads <project> --status open      # Filter by status
+wt beads <project> --json             # JSON output for scripting/LLM consumption
 wt beads foo-frontend --status open
 ```
 
@@ -261,6 +265,7 @@ Discards all changes, removes worktree, keeps bead open.
 
 ```bash
 wt projects                 # List registered projects
+wt projects --json          # JSON output for scripting/LLM consumption
 ```
 
 Shows: name, repo path, merge mode, active session count
@@ -624,17 +629,51 @@ Workers inherit `BEADS_DIR` from the project, so bd commands inside workers oper
 
 ---
 
+## Machine-Readable Output (--json)
+
+Most listing commands support `--json` for machine-readable output, useful for:
+- **LLM/AI agent consumption** - Skills, automation, intelligent decision making
+- **Scripting and pipelines** - Parse output with jq, integrate into scripts
+- **Integration with other tools** - Build custom dashboards, notifications
+
+### Commands with JSON support
+
+```bash
+wt list --json              # Sessions array
+wt projects --json          # Projects array with session counts
+wt ready --json             # Ready beads array
+wt beads <project> --json   # Project beads array
+wt status --json            # Current session object
+```
+
+### Example: Parse with jq
+
+```bash
+# Get names of all active sessions
+wt list --json | jq -r '.[].name'
+
+# Get ready beads with priority 0 (critical)
+wt ready --json | jq '.[] | select(.priority == 0)'
+
+# Count sessions per project
+wt list --json | jq 'group_by(.project) | map({project: .[0].project, count: length})'
+```
+
+---
+
 ## Quick Reference
 
 | Command | Description |
 |---------|-------------|
 | `wt` | List active sessions |
+| `wt --json` | List sessions as JSON (for scripting/LLM) |
 | `wt new <bead>` | Spawn worker for bead (stays in hub) |
 | `wt new <bead> --switch` | Spawn and switch to worker |
 | `wt new <bead> --no-test-env` | Spawn without test env setup |
 | `wt <name>` | Switch to session |
 | `wt watch` | Interactive TUI (↑↓ navigate, Enter switch, q quit) |
 | `wt status` | Current session info (in worker) |
+| `wt status --json` | Session status as JSON |
 | `wt signal ready "msg"` | Signal work complete (in worker) |
 | `wt signal blocked "msg"` | Signal blocked (in worker) |
 | `wt signal error "msg"` | Signal error (in worker) |
@@ -643,11 +682,14 @@ Workers inherit `BEADS_DIR` from the project, so bd commands inside workers oper
 | `wt kill <name>` | Terminate session |
 | `wt abandon` | Discard work (in worker) |
 | `wt projects` | List projects |
+| `wt projects --json` | List projects as JSON |
 | `wt project add` | Register project |
 | `wt ready` | Show ready beads (all projects) |
+| `wt ready --json` | Ready beads as JSON |
 | `wt ready <project>` | Show ready beads (one project) |
 | `wt create <project> <title>` | Create bead in project |
 | `wt beads <project>` | List beads for project |
+| `wt beads <project> --json` | Project beads as JSON |
 | `wt seance` | List past sessions (workers + hub) |
 | `wt seance <name>` | Talk to past session |
 | `wt seance hub` | Resume last hub session |
