@@ -64,8 +64,9 @@ func NewSession(name, workdir, beadsDir, editorCmd string, opts *SessionOptions)
 }
 
 // NewSeanceSession creates a tmux session for resuming a past Claude conversation.
-// It runs claude --resume in a new session, optionally switching to it.
-func NewSeanceSession(name, workdir, claudeSessionID string, switchTo bool) error {
+// It runs editorCmd --resume in a new session, optionally switching to it.
+// editorCmd should be the base command (e.g., "claude --dangerously-skip-permissions")
+func NewSeanceSession(name, workdir, editorCmd, claudeSessionID string, switchTo bool) error {
 	// Check if session already exists
 	if SessionExists(name) {
 		return fmt.Errorf("tmux session '%s' already exists", name)
@@ -82,8 +83,8 @@ func NewSeanceSession(name, workdir, claudeSessionID string, switchTo bool) erro
 		return fmt.Errorf("creating tmux session: %w", err)
 	}
 
-	// Send the claude --resume command
-	resumeCmd := fmt.Sprintf("claude --resume %s", claudeSessionID)
+	// Send the claude --resume command using the configured editor
+	resumeCmd := fmt.Sprintf("%s --resume %s", editorCmd, claudeSessionID)
 	sendCmd := exec.Command("tmux", "send-keys", "-t", name, resumeCmd, "Enter")
 	if err := sendCmd.Run(); err != nil {
 		return fmt.Errorf("starting claude resume: %w", err)

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/table"
@@ -431,11 +432,20 @@ func cmdSeanceResume(cfg *config.Config, event *events.Event) error {
 		fmt.Printf("Resuming '%s' (bead: %s) in new pane...\n", event.Session, event.Bead)
 	}
 
+	// Use EditorCmd from config (defaults to "claude --dangerously-skip-permissions")
+	editorCmd := cfg.EditorCmd
+	if editorCmd == "" {
+		editorCmd = "claude"
+	}
+
 	// Check if we're in tmux
 	if os.Getenv("TMUX") == "" {
 		// Not in tmux - fall back to direct resume (replaces current process)
 		fmt.Println("Note: Not in tmux, resuming in current terminal")
-		cmd := exec.Command("claude", "--resume", event.ClaudeSession)
+		// Split editorCmd and add --resume flag
+		args := strings.Fields(editorCmd)
+		args = append(args, "--resume", event.ClaudeSession)
+		cmd := exec.Command(args[0], args[1:]...)
 		cmd.Stdin = os.Stdin
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
@@ -443,7 +453,7 @@ func cmdSeanceResume(cfg *config.Config, event *events.Event) error {
 	}
 
 	// Open in new tmux window and run claude --resume
-	resumeCmd := fmt.Sprintf("claude --resume %s", event.ClaudeSession)
+	resumeCmd := fmt.Sprintf("%s --resume %s", editorCmd, event.ClaudeSession)
 	cmd := exec.Command("tmux", "new-window", "-n", "seance", resumeCmd)
 	return cmd.Run()
 }
@@ -471,8 +481,14 @@ func cmdSeanceSpawn(cfg *config.Config, event *events.Event) error {
 
 	fmt.Printf("Spawning seance session '%s' for past session '%s'...\n", sessionName, event.Session)
 
+	// Use EditorCmd from config (defaults to "claude --dangerously-skip-permissions")
+	editorCmd := cfg.EditorCmd
+	if editorCmd == "" {
+		editorCmd = "claude"
+	}
+
 	// Create the seance session
-	if err := tmux.NewSeanceSession(sessionName, workdir, event.ClaudeSession, true); err != nil {
+	if err := tmux.NewSeanceSession(sessionName, workdir, editorCmd, event.ClaudeSession, true); err != nil {
 		return err
 	}
 
