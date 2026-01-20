@@ -44,47 +44,7 @@ SEE ALSO:
 }
 
 func cmdProjects(cfg *config.Config) error {
-	mgr := project.NewManager(cfg)
-	projects, err := mgr.List()
-	if err != nil {
-		return err
-	}
-
-	if len(projects) == 0 {
-		fmt.Println("No projects registered.")
-		fmt.Println("\nRegister a project: wt project add <name> <path>")
-		return nil
-	}
-
-	// Count active sessions per project
-	state, _ := session.LoadState(cfg)
-	sessionCount := make(map[string]int)
-	for _, sess := range state.Sessions {
-		sessionCount[sess.Project]++
-	}
-
-	fmt.Println("┌─ Projects ──────────────────────────────────────────────────────────────┐")
-	fmt.Println("│                                                                         │")
-	fmt.Printf("│  %-14s %-24s %-12s %-16s │\n", "Name", "Repo", "Merge Mode", "Active Sessions")
-	fmt.Printf("│  %-14s %-24s %-12s %-16s │\n", "────", "────", "──────────", "───────────────")
-
-	for _, proj := range projects {
-		count := sessionCount[proj.Name]
-		countStr := fmt.Sprintf("%d", count)
-		if count == 0 {
-			countStr = "-"
-		}
-		fmt.Printf("│  %-14s %-24s %-12s %-16s │\n",
-			truncate(proj.Name, 14),
-			truncate(proj.Repo, 24),
-			proj.MergeMode,
-			countStr)
-	}
-
-	fmt.Println("│                                                                         │")
-	fmt.Println("└─────────────────────────────────────────────────────────────────────────┘")
-
-	return nil
+	return runProjectsTUI(cfg)
 }
 
 func cmdProject(cfg *config.Config, args []string) error {
