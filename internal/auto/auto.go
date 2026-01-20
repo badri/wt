@@ -18,9 +18,9 @@ import (
 
 // Config holds auto-mode configuration from project config
 type Config struct {
-	Command         string `json:"command"`
-	TimeoutMinutes  int    `json:"timeout_minutes"`
-	PromptTemplate  string `json:"prompt_template"`
+	Command        string `json:"command"`
+	TimeoutMinutes int    `json:"timeout_minutes"`
+	PromptTemplate string `json:"prompt_template"`
 }
 
 // DefaultConfig returns default auto configuration
@@ -34,13 +34,13 @@ func DefaultConfig() *Config {
 
 // Options holds CLI options for wt auto
 type Options struct {
-	Project    string
-	MergeMode  string
-	DryRun     bool
-	Check      bool
-	Stop       bool
-	Force      bool
-	Timeout    int // minutes, 0 means use project default
+	Project   string
+	MergeMode string
+	DryRun    bool
+	Check     bool
+	Stop      bool
+	Force     bool
+	Timeout   int // minutes, 0 means use project default
 }
 
 // Runner manages the auto execution loop

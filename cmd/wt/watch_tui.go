@@ -70,10 +70,10 @@ var (
 
 // Key bindings
 type keyMap struct {
-	Up     key.Binding
-	Down   key.Binding
-	Enter  key.Binding
-	Quit   key.Binding
+	Up      key.Binding
+	Down    key.Binding
+	Enter   key.Binding
+	Quit    key.Binding
 	Refresh key.Binding
 }
 

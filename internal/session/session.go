@@ -11,7 +11,7 @@ type Session struct {
 	BeadsDir      string `json:"beads_dir"`
 	CreatedAt     string `json:"created_at"`
 	LastActivity  string `json:"last_activity"`
-	Status        string `json:"status"`                    // working, idle, ready, blocked, error
+	Status        string `json:"status"`                   // working, idle, ready, blocked, error
 	StatusMessage string `json:"status_message,omitempty"` // Optional message (e.g., PR URL, error details)
 }
 

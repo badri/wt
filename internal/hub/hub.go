@@ -29,12 +29,12 @@ type Options struct {
 
 // Status contains hub session status information.
 type Status struct {
-	Exists       bool   // Whether hub session exists
-	Attached     bool   // Whether we're currently attached to hub
-	WorkingDir   string // Hub's working directory
-	WindowCount  int    // Number of tmux windows
-	CreatedAt    string // Session creation time (if available)
-	CurrentPane  string // Current pane info
+	Exists      bool   // Whether hub session exists
+	Attached    bool   // Whether we're currently attached to hub
+	WorkingDir  string // Hub's working directory
+	WindowCount int    // Number of tmux windows
+	CreatedAt   string // Session creation time (if available)
+	CurrentPane string // Current pane info
 }
 
 // Run executes the hub command based on options.
@@ -155,7 +155,7 @@ func create(cfg *config.Config, opts *Options) error {
 	cmd := exec.Command("tmux", "new-session",
 		"-d",                 // detached
 		"-s", HubSessionName, // session name
-		"-c", homeDir,        // working directory
+		"-c", homeDir, // working directory
 	)
 
 	if err := cmd.Run(); err != nil {

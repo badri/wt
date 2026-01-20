@@ -8,11 +8,11 @@ import (
 
 func TestParseNewFlags(t *testing.T) {
 	tests := []struct {
-		name        string
-		args        []string
-		wantBeadID  string
-		wantRepo    string
-		wantName    string
+		name            string
+		args            []string
+		wantBeadID      string
+		wantRepo        string
+		wantName        string
 		wantNoSwitch    bool
 		wantForceSwitch bool
 		wantNoTestEnv   bool

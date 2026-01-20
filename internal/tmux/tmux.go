@@ -23,9 +23,9 @@ func NewSession(name, workdir, beadsDir, editorCmd string, opts *SessionOptions)
 	// Create tmux session in detached mode
 	// Set BEADS_DIR environment variable and start the editor
 	cmd := exec.Command("tmux", "new-session",
-		"-d",           // detached
-		"-s", name,     // session name
-		"-c", workdir,  // working directory
+		"-d",       // detached
+		"-s", name, // session name
+		"-c", workdir, // working directory
 	)
 	cmd.Env = append(os.Environ(), fmt.Sprintf("BEADS_DIR=%s", beadsDir))
 

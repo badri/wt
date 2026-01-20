@@ -26,15 +26,15 @@ const (
 
 // Event represents a logged event
 type Event struct {
-	Time           string    `json:"time"`
-	Type           EventType `json:"type"`
-	Session        string    `json:"session"`
-	Bead           string    `json:"bead"`
-	Project        string    `json:"project"`
-	ClaudeSession  string    `json:"claude_session,omitempty"`
-	PRURL          string    `json:"pr_url,omitempty"`
-	MergeMode      string    `json:"merge_mode,omitempty"`
-	WorktreePath   string    `json:"worktree,omitempty"`
+	Time          string    `json:"time"`
+	Type          EventType `json:"type"`
+	Session       string    `json:"session"`
+	Bead          string    `json:"bead"`
+	Project       string    `json:"project"`
+	ClaudeSession string    `json:"claude_session,omitempty"`
+	PRURL         string    `json:"pr_url,omitempty"`
+	MergeMode     string    `json:"merge_mode,omitempty"`
+	WorktreePath  string    `json:"worktree,omitempty"`
 }
 
 // Logger handles event logging

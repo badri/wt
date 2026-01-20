@@ -10,9 +10,9 @@ import (
 )
 
 type Pool struct {
-	names   []string
-	theme   string
-	path    string // optional, for file-based pools
+	names []string
+	theme string
+	path  string // optional, for file-based pools
 }
 
 // Load loads a namepool from the config file (legacy/fallback method)
