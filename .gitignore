@@ -1,3 +1,6 @@
 /wt
 coverage.out
 coverage.html
+
+# MkDocs build output
+site/

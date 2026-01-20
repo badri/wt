@@ -1,0 +1,87 @@
+site_name: wt - Worktree Session Manager
+site_description: Minimal agentic coding orchestrator built on beads, git worktrees, tmux, and Claude
+site_url: https://badri.github.io/wt
+repo_url: https://github.com/badri/wt
+repo_name: badri/wt
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+  icon:
+    repo: fontawesome/brands/github
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - tables
+  - attr_list
+  - md_in_html
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - Installation: getting-started/installation.md
+      - Quick Start: getting-started/quickstart.md
+      - Shell Integration: getting-started/shell-integration.md
+  - Concepts:
+      - Overview: concepts/overview.md
+      - Sessions: concepts/sessions.md
+      - Worktrees: concepts/worktrees.md
+      - Beads Integration: concepts/beads.md
+      - Test Environments: concepts/test-environments.md
+      - Merge Modes: concepts/merge-modes.md
+  - Commands:
+      - Hub Commands: commands/hub.md
+      - Worker Commands: commands/worker.md
+      - Configuration: commands/config.md
+      - Utilities: commands/utilities.md
+  - Guides:
+      - Hub Workflow: guides/hub-workflow.md
+      - Seance: guides/seance.md
+      - Auto Mode: guides/auto-mode.md
+      - MCP Integration: mcp-integration.md
+  - Reference:
+      - Configuration: reference/configuration.md
+      - Environment Variables: reference/environment.md
+      - Troubleshooting: reference/troubleshooting.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/badri/wt
