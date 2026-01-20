@@ -62,6 +62,57 @@ wt doctor
 
 This will verify that all dependencies are installed and configured correctly.
 
+## Claude Code Skill Setup
+
+**This is the most important step.** Most wt usage happens through Claude conversations, not direct CLI commands.
+
+### Install the wt Skill
+
+Copy the skill to your Claude Code skills directory:
+
+```bash
+# Create skills directory if it doesn't exist
+mkdir -p ~/.claude/skills
+
+# Copy the wt skill
+cp -r /path/to/wt/examples/claude-code-skill ~/.claude/skills/wt
+```
+
+Or if you installed via npm/go, download directly:
+
+```bash
+mkdir -p ~/.claude/skills
+curl -sL https://raw.githubusercontent.com/badri/wt/main/examples/claude-code-skill/SKILL.md \
+  -o ~/.claude/skills/wt.md
+```
+
+### Verify Skill Installation
+
+In a Claude Code session, try:
+
+```
+/wt
+```
+
+Claude should recognize the wt skill and show session management capabilities.
+
+### How You'll Use wt
+
+In practice, you interact with wt through Claude conversations:
+
+```
+You: "What workers are running?"
+Claude: [runs wt, shows active sessions]
+
+You: "Spawn a worker for wt-abc"
+Claude: [runs wt new wt-abc, reports result]
+
+You: "Check on toast"
+Claude: [runs wt toast to switch to that session]
+```
+
+The skill teaches Claude the wt commands and workflows, so you don't need to remember CLI syntax.
+
 ## Next Steps
 
 - [Quick Start](quickstart.md) - Create your first session

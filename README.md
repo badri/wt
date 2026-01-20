@@ -94,6 +94,18 @@ make install
 xattr -d com.apple.quarantine $(which wt)
 ```
 
+## Claude Code Skill Setup
+
+**Most wt usage happens through Claude conversations, not direct CLI.** Install the skill:
+
+```bash
+mkdir -p ~/.claude/skills
+curl -sL https://raw.githubusercontent.com/badri/wt/main/examples/claude-code-skill/SKILL.md \
+  -o ~/.claude/skills/wt.md
+```
+
+Then in Claude Code, use `/wt` to access wt commands through conversation.
+
 ## Shell Completions
 
 ```bash
