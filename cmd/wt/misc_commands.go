@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/bubbles/table"
 
 	"github.com/badri/wt/internal/auto"
+	"github.com/badri/wt/internal/bead"
 	"github.com/badri/wt/internal/config"
 	"github.com/badri/wt/internal/events"
 	"github.com/badri/wt/internal/session"
@@ -293,6 +294,7 @@ func configEditor(cfg *config.Config) error {
 type pickerEntry struct {
 	name    string
 	bead    string
+	title   string
 	project string
 	status  string
 }
@@ -316,9 +318,17 @@ func cmdPick(cfg *config.Config) error {
 		if status == "" {
 			status = "working"
 		}
+
+		// Get bead title
+		title := ""
+		if beadInfo, err := bead.Show(sess.Bead); err == nil && beadInfo != nil {
+			title = beadInfo.Title
+		}
+
 		entries = append(entries, pickerEntry{
 			name:    name,
 			bead:    sess.Bead,
+			title:   title,
 			project: sess.Project,
 			status:  status,
 		})
@@ -341,13 +351,17 @@ func pickWithFzf(entries []pickerEntry) error {
 	// Build input for fzf
 	var lines []string
 	for _, e := range entries {
-		line := fmt.Sprintf("%-12s %-18s %-10s %s", e.name, e.bead, e.status, e.project)
+		titleStr := e.title
+		if len(titleStr) > 30 {
+			titleStr = titleStr[:28] + ".."
+		}
+		line := fmt.Sprintf("%-12s %-10s %-30s %s", e.name, e.status, titleStr, e.project)
 		lines = append(lines, line)
 	}
 	input := strings.Join(lines, "\n")
 
 	// Run fzf
-	cmd := exec.Command("fzf", "--header=Name         Bead               Status     Project",
+	cmd := exec.Command("fzf", "--header=Name         Status     Title                          Project",
 		"--prompt=Select session: ",
 		"--height=40%",
 		"--reverse")
@@ -381,9 +395,13 @@ func pickWithFzf(entries []pickerEntry) error {
 
 func pickWithPrompt(entries []pickerEntry) error {
 	fmt.Println("Active Sessions:")
-	fmt.Println("------------------------------------------------------------")
+	fmt.Println("--------------------------------------------------------------------------------")
 	for i, e := range entries {
-		fmt.Printf("  [%d] %-12s %-18s %-10s %s\n", i+1, e.name, e.bead, e.status, e.project)
+		titleStr := e.title
+		if len(titleStr) > 30 {
+			titleStr = titleStr[:28] + ".."
+		}
+		fmt.Printf("  [%d] %-12s %-10s %-30s %s\n", i+1, e.name, e.status, titleStr, e.project)
 	}
 	fmt.Println()
 

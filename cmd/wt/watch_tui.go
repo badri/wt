@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/badri/wt/internal/bead"
 	"github.com/badri/wt/internal/config"
 	"github.com/badri/wt/internal/monitor"
 	"github.com/badri/wt/internal/session"
@@ -103,6 +104,7 @@ var keys = keyMap{
 type sessionItem struct {
 	name    string
 	bead    string
+	title   string
 	project string
 	status  string
 	message string
@@ -147,9 +149,16 @@ func loadSessionsCmd(cfg *config.Config) tea.Cmd {
 			}
 			idle := monitor.GetIdleMinutes(name)
 
+			// Get bead title
+			title := ""
+			if beadInfo, err := bead.Show(sess.Bead); err == nil && beadInfo != nil {
+				title = beadInfo.Title
+			}
+
 			items = append(items, sessionItem{
 				name:    name,
 				bead:    sess.Bead,
+				title:   title,
 				project: sess.Project,
 				status:  status,
 				message: sess.StatusMessage,
@@ -299,6 +308,9 @@ func (m watchModel) View() string {
 			var cardContent string
 			cardContent += cardTitleStyle.Render(sess.name) + "\n"
 			cardContent += cardLabelStyle.Render("Bead:    ") + cardValueStyle.Render(sess.bead) + "\n"
+			if sess.title != "" {
+				cardContent += cardLabelStyle.Render("Title:   ") + cardValueStyle.Render(sess.title) + "\n"
+			}
 			cardContent += cardLabelStyle.Render("Project: ") + cardValueStyle.Render(sess.project) + "\n"
 			cardContent += cardLabelStyle.Render("Status:  ") + m.renderStatus(sess.status) + "\n"
 			if sess.message != "" {

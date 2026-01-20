@@ -168,10 +168,9 @@ func cmdList(cfg *config.Config) error {
 	// Define columns
 	columns := []table.Column{
 		{Title: "Name", Width: 12},
-		{Title: "Bead", Width: 18},
 		{Title: "Status", Width: 10},
-		{Title: "Activity", Width: 12},
-		{Title: "Project", Width: 16},
+		{Title: "Title", Width: 32},
+		{Title: "Project", Width: 12},
 	}
 
 	// Build rows
@@ -182,13 +181,17 @@ func cmdList(cfg *config.Config) error {
 			status = "working"
 		}
 
-		lastActivity := formatDuration(sess.LastActivity)
+		// Get bead title
+		title := ""
+		if beadInfo, err := bead.Show(sess.Bead); err == nil && beadInfo != nil {
+			title = beadInfo.Title
+		}
+
 		rows = append(rows, table.Row{
 			name,
-			truncate(sess.Bead, 18),
 			status,
-			lastActivity,
-			truncate(sess.Project, 16),
+			truncate(title, 32),
+			truncate(sess.Project, 12),
 		})
 	}
 
