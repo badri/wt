@@ -8,7 +8,27 @@
 - **Tmux** for session persistence
 - **Claude** (or other agents) for execution
 
-**Philosophy**: One bead = one session = one worktree. Sessions persist until you explicitly close them. No auto-compaction, no handoff complexity.
+## Philosophy
+
+**One bead = one session = one worktree.**
+
+Each task (bead) gets its own isolated environment: a dedicated git worktree, a persistent tmux session, and an AI agent working on just that task. Sessions persist until you explicitly close them—no auto-compaction, no context loss, no handoff complexity.
+
+### Hub-and-Spoke Model
+
+The architecture separates orchestration from execution:
+
+- **Hub**: Your control center for grooming beads, spawning workers, and monitoring progress. This is where you make decisions about what work to do next.
+- **Workers**: Isolated sessions where AI agents execute tasks autonomously. Each worker focuses on exactly one bead.
+
+This separation means you can run multiple agents in parallel without conflicts, while maintaining visibility into what each one is doing.
+
+### Design Principles
+
+1. **Explicit over automatic**: Sessions don't auto-close or auto-compact. You control the lifecycle.
+2. **Isolation over sharing**: Each worker has its own worktree, branch, and optionally its own test environment.
+3. **Visibility over opacity**: `wt watch` shows all sessions at a glance. Signals communicate status.
+4. **Simplicity over features**: Start simple, extend only when needed. The core commands are just `new`, `switch`, `done`, `close`.
 
 ---
 
@@ -458,6 +478,139 @@ retry mechanism with exponential backoff in deploy.py:142...
 
 ---
 
+## Hub Mode
+
+The hub is your orchestration center—a dedicated session for grooming beads, spawning workers, and monitoring progress.
+
+### `wt hub`
+Start or attach to the hub session.
+
+```bash
+$ wt hub                    # Start/attach to hub
+$ wt hub -d                 # Start hub detached
+$ wt hub -s                 # Show hub status
+$ wt hub -k                 # Kill hub session
+```
+
+The hub session:
+- Runs in tmux session named "hub"
+- Launches Claude with project context
+- Persists across terminal disconnects
+
+---
+
+## Auto Mode
+
+Autonomous batch processing of ready beads. The hub spawns workers, monitors them, and processes the next bead when one completes.
+
+### `wt auto`
+Start autonomous processing.
+
+```bash
+$ wt auto                           # Process all ready beads
+$ wt auto --project myproject       # Only beads from one project
+$ wt auto --timeout 30m             # Per-bead timeout
+$ wt auto --dry-run                 # Show what would be processed
+$ wt auto --check                   # Check if auto mode is running
+$ wt auto --stop                    # Stop auto mode gracefully
+```
+
+Options:
+- `--project <name>`: Filter to specific project
+- `--merge-mode <mode>`: Override project merge mode
+- `--timeout <duration>`: Max time per bead (default: none)
+- `--dry-run`: Preview without executing
+- `--check`: Check auto mode status
+- `--stop`: Signal auto mode to stop after current bead
+
+### How It Works
+
+1. Find ready beads (`bd ready`)
+2. Spawn worker for first bead
+3. Wait for session to signal completion
+4. Close session, process next bead
+5. Repeat until no more ready beads
+
+---
+
+## Session Signals
+
+Workers communicate status back to the hub via signals. This enables monitoring and automation.
+
+### `wt signal <status> [message]`
+Update session status.
+
+```bash
+$ wt signal ready "PR created"      # Work complete, ready for review
+$ wt signal blocked "Waiting on API" # Blocked on external dependency
+$ wt signal error "Tests failing"   # Hit an error
+$ wt signal working                 # Back to work
+$ wt signal idle                    # Waiting for input
+```
+
+Status values:
+- `working` — Actively processing
+- `idle` — Waiting for input
+- `ready` — Work complete
+- `blocked` — Waiting on dependency
+- `error` — Hit a problem
+
+Signals are stored in `sessions.json` and displayed in `wt watch`.
+
+---
+
+## Handoff
+
+Hand off a session to a fresh Claude instance while preserving context. Useful when Claude's context gets long or you want to restart with summarized history.
+
+### `wt handoff`
+Hand off current session.
+
+```bash
+$ wt handoff                        # Interactive handoff
+$ wt handoff -m "Focus on tests"    # Include guidance message
+$ wt handoff -c                     # Collect context only (don't restart)
+$ wt handoff --dry-run              # Show what would be handed off
+```
+
+Options:
+- `-m, --message <text>`: Include guidance for the new instance
+- `-c, --collect`: Just collect context, don't restart Claude
+- `--dry-run`: Preview the handoff document
+
+### How It Works
+
+1. Collects current context (bead, git status, recent changes)
+2. Summarizes conversation history
+3. Starts fresh Claude instance with context injected
+4. Original instance terminates
+
+---
+
+## Prime
+
+Inject context on session startup. Used by hooks to give Claude immediate context about what it's working on.
+
+### `wt prime`
+Prime the current session with context.
+
+```bash
+$ wt prime                          # Full context injection
+$ wt prime -q                       # Quiet mode (less output)
+$ wt prime --no-bd-prime            # Skip bd prime
+```
+
+Typically called automatically by session startup hooks, not manually.
+
+### What Gets Injected
+
+- Session info (name, bead, project)
+- Bead details (title, description, dependencies)
+- Git status
+- Recent events
+
+---
+
 ## Merge Modes
 
 Configured per-project in `merge_mode`:
@@ -772,66 +925,39 @@ $ wt close toast            # Cleanup
 
 ---
 
-## Implementation Checklist
+## Implementation Status
 
-### Phase 1: Core
-- [ ] `wt` (list sessions)
-- [ ] `wt new <bead>` (spawn with namepool)
-- [ ] `wt <name>` (switch to session)
-- [ ] `wt kill <name>` (terminate)
-- [ ] `wt close <name>` (complete + cleanup)
-- [ ] Session state tracking (sessions.json)
-- [ ] Namepool management
-- [ ] BEADS_DIR per session
+All core phases have been implemented. See the command reference above for full usage.
 
-### Phase 2: Projects
-- [ ] `wt projects` (list)
-- [ ] `wt project add` (register)
-- [ ] `wt project config` (edit)
-- [ ] Per-project merge_mode
-- [ ] Per-project test_env config
+**Core Features** (Phase 1-4): Session management, project registration, test environments, merge workflows — all complete.
 
-### Phase 3: Test Environment
-- [ ] Port offset allocation
-- [ ] test_env.setup on create
-- [ ] test_env.teardown on close
-- [ ] Health check waiting
+**Monitoring** (Phase 5): Live dashboard (`wt watch`), idle detection, status signals — complete.
 
-### Phase 4: Merge Workflow
-- [ ] `wt done` command
-- [ ] direct mode (merge to main)
-- [ ] pr-auto mode (create PR, auto-merge)
-- [ ] pr-review mode (create PR, wait)
+**Seance** (Phase 6): Event logging, past session queries, session resumption — complete.
 
-### Phase 5: Monitoring
-- [ ] `wt watch` (live dashboard)
-- [ ] Idle detection
-- [ ] Desktop notifications
-- [ ] PR status in dashboard
+**Polish** (Phase 7): Tmux keybindings, shell completions, documentation — complete.
 
-### Phase 6: Seance
-- [ ] Event logging (session IDs)
-- [ ] `wt seance` (list past sessions)
-- [ ] `wt seance <name>` (talk to past session)
-- [ ] Session ID to name mapping
-
-### Phase 7: Polish
-- [ ] Tmux keybindings
-- [ ] Claude skill
-- [ ] Shell completions
-- [ ] Error handling
-- [ ] Documentation
+**Additional Features** (beyond original spec):
+- **Hub mode** (`wt hub`) — Dedicated orchestration session
+- **Auto mode** (`wt auto`) — Autonomous batch processing
+- **Handoff** (`wt handoff`) — Context-preserving Claude restarts
+- **Prime** (`wt prime`) — Session context injection on startup
+- **Signals** (`wt signal`) — Worker-to-hub status communication
+- **Interactive picker** (`wt pick`) — fzf-powered session selection
 
 ---
 
-## Design Decisions (Locked)
+## Design Decisions
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-| Hub session | Any terminal | No extra session to manage |
+| Hub session | Optional (`wt hub`) | Can orchestrate from any terminal, dedicated hub is convenience |
 | Multiple workers same bead | Block | One bead = one session, enforce it |
 | Auto-cleanup on merge | No | Manual `wt close`, you control lifecycle |
 | Session restore after reboot | No | Start fresh, state file is just tracking |
 | Namepool exhaustion | Error | 20 names is plenty, clean up old sessions |
+| Signal-based communication | Pull model | Workers signal status, hub polls—no complex pub/sub |
+| Context handoff | Explicit | `wt handoff` is manual, not automatic on context overflow |
+| Auto mode | Opt-in | Autonomous processing requires explicit `wt auto`, not default |
 
-**Philosophy**: Keep it simple. Extend later if needed.
+These decisions favor explicitness and simplicity over automation and magic.

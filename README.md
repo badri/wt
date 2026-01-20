@@ -8,11 +8,19 @@ Minimal agentic coding orchestrator built on:
 
 ## Philosophy
 
-One bead = one session = one worktree. Sessions persist until you explicitly close them. No auto-compaction, no handoff complexity.
+**One bead = one session = one worktree.**
 
-## Status
+Each task (bead) gets its own isolated environment: a dedicated git worktree, a persistent tmux session, and an AI agent working on just that task. Sessions persist until you explicitly close them—no auto-compaction, no context loss, no handoff complexity.
 
-**Work in progress.** See [SPEC.md](SPEC.md) for the full specification.
+The **hub-and-spoke model** keeps you in control:
+- **Hub**: Your orchestration session where you groom beads, spawn workers, and monitor progress
+- **Workers**: Isolated sessions where AI agents execute tasks autonomously
+
+This separation means you can run multiple agents in parallel without them stepping on each other, while maintaining visibility into what each one is doing.
+
+## Documentation
+
+📚 **[Full Documentation](docs/index.md)** — Installation, concepts, command reference, and guides.
 
 ## Quick Overview
 
@@ -38,6 +46,29 @@ wt toast
 wt done                     # Commits, pushes, creates PR
 wt close toast              # Cleanup session + worktree
 ```
+
+## Key Features
+
+**Session Management**
+- `wt new <bead>` — Spawn isolated worker sessions
+- `wt watch` — Live TUI dashboard with status indicators
+- `wt pick` — Interactive session picker (fzf integration)
+- `wt signal` — Communicate session status (ready, blocked, error)
+
+**Hub Orchestration**
+- `wt hub` — Dedicated orchestration session
+- `wt auto` — Autonomous batch processing of ready beads
+- `wt ready` — See what work is available across projects
+
+**Session History**
+- `wt seance` — Talk to past sessions ("Why did you make this decision?")
+- `wt events` — Full event history with filtering
+- `wt handoff` — Hand off to fresh Claude instance with context
+
+**Multi-Project Support**
+- Register multiple projects with different configurations
+- Per-project merge modes (direct, PR with auto-merge, PR with review)
+- Port isolation for parallel test environments
 
 ## Installation
 

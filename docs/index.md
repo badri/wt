@@ -11,16 +11,32 @@
 
 **One bead = one session = one worktree.**
 
-Sessions persist until you explicitly close them. No auto-compaction, no handoff complexity. Each worker session is isolated in its own git worktree, working on exactly one bead.
+Each task (bead) gets its own isolated environment: a dedicated git worktree, a persistent tmux session, and an AI agent working on just that task. Sessions persist until you explicitly close them—no auto-compaction, no context loss, no handoff complexity.
+
+### Hub-and-Spoke Model
+
+The architecture separates orchestration from execution:
+
+- **Hub**: Your control center for grooming beads, spawning workers, and monitoring progress
+- **Workers**: Isolated sessions where AI agents execute tasks autonomously
+
+This separation means you can run multiple agents in parallel without conflicts, while maintaining visibility into what each one is doing.
+
+### Design Principles
+
+1. **Explicit over automatic** — Sessions don't auto-close. You control the lifecycle.
+2. **Isolation over sharing** — Each worker has its own worktree, branch, and test environment.
+3. **Visibility over opacity** — `wt watch` shows all sessions at a glance.
+4. **Simplicity over features** — Core commands are just `new`, `switch`, `done`, `close`.
 
 ## Why wt?
 
 When you're orchestrating multiple AI coding agents, you need:
 
-1. **Isolation** - Each agent works in its own directory, no conflicts
-2. **Persistence** - Sessions survive disconnects, pick up where you left off
-3. **Visibility** - See what all your agents are doing at a glance
-4. **Integration** - Native integration with your existing git workflow
+1. **Isolation** — Each agent works in its own directory, no conflicts
+2. **Persistence** — Sessions survive disconnects, pick up where you left off
+3. **Visibility** — See what all your agents are doing at a glance
+4. **Integration** — Native integration with your existing git workflow
 
 wt gives you all of this with a simple CLI.
 
