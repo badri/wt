@@ -32,6 +32,10 @@ func parseHubFlags(args []string) *hub.Options {
 			opts.Kill = true
 		case "-f", "--force":
 			opts.Force = true
+		case "-w", "--watch":
+			opts.Watch = true
+		case "--no-watch":
+			opts.NoWatch = true
 		}
 	}
 	return opts

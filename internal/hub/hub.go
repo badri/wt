@@ -23,7 +23,8 @@ type Options struct {
 	Status  bool // Show hub status without attaching
 	Kill    bool // Kill the hub session
 	Force   bool // Skip confirmation prompt
-	NoWatch bool // Don't start wt watch pane
+	NoWatch bool // Don't start wt watch pane (on create)
+	Watch   bool // Add wt watch pane (when attaching to existing hub)
 }
 
 // Status contains hub session status information.
@@ -129,7 +130,12 @@ func GetStatus() Status {
 // createOrAttach creates a new hub session or attaches to existing one.
 func createOrAttach(cfg *config.Config, opts *Options) error {
 	if Exists() {
-		// Hub exists - attach to it
+		// Hub exists - optionally add watch pane before attaching
+		if opts.Watch {
+			if err := addWatchPane(); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: could not add watch pane: %v\n", err)
+			}
+		}
 		return attach()
 	}
 
@@ -196,6 +202,45 @@ func create(cfg *config.Config, opts *Options) error {
 
 	// Attach to the new session
 	return attach()
+}
+
+// addWatchPane adds a watch pane to an existing hub session.
+func addWatchPane() error {
+	// Check how many panes exist
+	cmd := exec.Command("tmux", "list-panes", "-t", HubSessionName, "-F", "#{pane_id}")
+	output, err := cmd.Output()
+	if err != nil {
+		return fmt.Errorf("listing panes: %w", err)
+	}
+
+	panes := strings.Split(strings.TrimSpace(string(output)), "\n")
+	if len(panes) > 1 {
+		// Already has multiple panes, assume watch exists
+		fmt.Println("Watch pane may already exist (hub has multiple panes)")
+		return nil
+	}
+
+	homeDir := os.Getenv("HOME")
+	if homeDir == "" {
+		homeDir = "/"
+	}
+
+	// Create watch pane
+	splitCmd := exec.Command("tmux", "split-window", "-h", "-t", HubSessionName, "-l", "25%", "-c", homeDir)
+	if err := splitCmd.Run(); err != nil {
+		return fmt.Errorf("creating watch pane: %w", err)
+	}
+
+	// Start wt watch in a loop
+	watchCmd := exec.Command("tmux", "send-keys", "-t", HubSessionName+".1", "while true; do wt watch; sleep 1; done", "Enter")
+	_ = watchCmd.Run()
+
+	// Focus back on main pane
+	focusCmd := exec.Command("tmux", "select-pane", "-t", HubSessionName+".0")
+	_ = focusCmd.Run()
+
+	fmt.Println("Added watch pane to hub")
+	return nil
 }
 
 // attach attaches to the hub session.

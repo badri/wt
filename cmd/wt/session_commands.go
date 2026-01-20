@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -300,21 +299,20 @@ func cmdNew(cfg *config.Config, args []string) error {
 	fmt.Printf("  Worktree: %s\n", worktreePath)
 	fmt.Printf("  Branch:   %s\n", beadID)
 
-	// Send initial work prompt to Claude after delay for startup
-	// Run synchronously to ensure prompt is sent before wt exits
+	// Wait for Claude to actually be running before sending prompt
 	fmt.Println("Waiting for Claude to start...")
-	time.Sleep(8 * time.Second) // Wait for Claude Code to fully initialize
+	if err := tmux.WaitForClaude(sessionName, 60*time.Second); err != nil {
+		fmt.Printf("Warning: %v (sending prompt anyway)\n", err)
+	}
+
+	// Additional delay for Claude to fully initialize its UI
+	time.Sleep(2 * time.Second)
+
+	// Send initial work prompt using reliable nudge pattern
 	fmt.Println("Sending initial prompt to worker...")
 	prompt := buildInitialPrompt(beadID, beadInfo.Title, proj)
-	// Send prompt text
-	sendPromptCmd := exec.Command("tmux", "send-keys", "-t", sessionName, prompt)
-	if err := sendPromptCmd.Run(); err != nil {
+	if err := tmux.NudgeSession(sessionName, prompt); err != nil {
 		fmt.Printf("Warning: could not send initial prompt: %v\n", err)
-	}
-	// Send Enter key separately
-	sendEnterCmd := exec.Command("tmux", "send-keys", "-t", sessionName, "Enter")
-	if err := sendEnterCmd.Run(); err != nil {
-		fmt.Printf("Warning: could not send Enter: %v\n", err)
 	}
 
 	// Determine if we should switch

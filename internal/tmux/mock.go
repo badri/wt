@@ -1,21 +1,30 @@
 package tmux
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 // MockRunner is a mock implementation of Runner for testing.
 type MockRunner struct {
-	Sessions          map[string]MockSession
-	NewSessionErr     error
-	AttachErr         error
-	SwitchClientErr   error
-	KillErr           error
-	ListErr           error
-	AttachCalled      bool
-	AttachedTo        string
-	SwitchClientCalled bool
-	SwitchClientTo    string
-	KillCalled        bool
-	KilledSession     string
+	Sessions            map[string]MockSession
+	NewSessionErr       error
+	AttachErr           error
+	SwitchClientErr     error
+	NudgeSessionErr     error
+	WaitForClaudeErr    error
+	KillErr             error
+	ListErr             error
+	AttachCalled        bool
+	AttachedTo          string
+	SwitchClientCalled  bool
+	SwitchClientTo      string
+	NudgeSessionCalled  bool
+	NudgeSessionTo      string
+	NudgeSessionMessage string
+	WaitForClaudeCalled bool
+	KillCalled          bool
+	KilledSession       string
 }
 
 // MockSession represents a mock tmux session.
@@ -82,6 +91,34 @@ func (m *MockRunner) SwitchClient(name string) error {
 
 	if _, exists := m.Sessions[name]; !exists {
 		return fmt.Errorf("session '%s' not found", name)
+	}
+	return nil
+}
+
+func (m *MockRunner) NudgeSession(session, message string) error {
+	m.NudgeSessionCalled = true
+	m.NudgeSessionTo = session
+	m.NudgeSessionMessage = message
+
+	if m.NudgeSessionErr != nil {
+		return m.NudgeSessionErr
+	}
+
+	if _, exists := m.Sessions[session]; !exists {
+		return fmt.Errorf("session '%s' not found", session)
+	}
+	return nil
+}
+
+func (m *MockRunner) WaitForClaude(session string, timeout time.Duration) error {
+	m.WaitForClaudeCalled = true
+
+	if m.WaitForClaudeErr != nil {
+		return m.WaitForClaudeErr
+	}
+
+	if _, exists := m.Sessions[session]; !exists {
+		return fmt.Errorf("session '%s' not found", session)
 	}
 	return nil
 }
