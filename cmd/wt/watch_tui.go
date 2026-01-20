@@ -50,6 +50,21 @@ var (
 	headerStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("241")).
 			Bold(true)
+
+	cardStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("62")).
+			Padding(0, 1)
+
+	cardTitleStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("170"))
+
+	cardLabelStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("241"))
+
+	cardValueStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("252"))
 )
 
 // Key bindings
@@ -228,66 +243,91 @@ func (m watchModel) View() string {
 		s += normalStyle.Render("No active sessions.\n")
 		s += helpStyle.Render("\nStart one with: wt new <bead>")
 	} else {
-		// Header
-		s += headerStyle.Render(fmt.Sprintf("  %-12s %-10s %-8s %s", "Session", "Bead", "Status", "Info")) + "\n"
-
-		// Sessions
+		// Sessions list
 		for i, sess := range m.sessions {
-			// Status icon and style
+			// Status style
 			var statusStr string
 			switch sess.status {
 			case "working":
-				statusStr = statusWorkingStyle.Render("working")
+				statusStr = statusWorkingStyle.Render("●")
 			case "idle":
-				statusStr = statusIdleStyle.Render("idle")
+				statusStr = statusIdleStyle.Render("●")
 			case "ready":
-				statusStr = statusReadyStyle.Render("ready")
+				statusStr = statusReadyStyle.Render("●")
 			case "blocked":
-				statusStr = statusBlockedStyle.Render("blocked")
+				statusStr = statusBlockedStyle.Render("●")
 			case "error":
-				statusStr = statusErrorStyle.Render("error")
+				statusStr = statusErrorStyle.Render("●")
 			default:
-				statusStr = normalStyle.Render(sess.status)
+				statusStr = normalStyle.Render("●")
 			}
 
-			// Info column (message or idle time)
-			info := ""
-			if sess.message != "" {
-				info = truncateStr(sess.message, 20)
-			} else if sess.idle > 0 {
-				if sess.idle >= 60 {
-					info = fmt.Sprintf("%dh%dm", sess.idle/60, sess.idle%60)
-				} else {
-					info = fmt.Sprintf("%dm", sess.idle)
-				}
-			}
-
-			// Format line
-			line := fmt.Sprintf("%-12s %-10s %-8s %s",
-				truncateStr(sess.name, 12),
-				truncateStr(sess.bead, 10),
-				sess.status,
-				info)
+			// Format line - compact for narrow panes
+			line := fmt.Sprintf("%s %-14s %s",
+				statusStr,
+				truncateStr(sess.name, 14),
+				truncateStr(sess.bead, 12))
 
 			// Apply selection style
 			if i == m.cursor {
-				s += selectedStyle.Render("> "+line) + "\n"
+				s += selectedStyle.Render("> "+truncateStr(sess.name, 14)+" "+truncateStr(sess.bead, 12)) + "\n"
 			} else {
-				// Re-render with status color
-				line = fmt.Sprintf("  %-12s %-10s %s %s",
-					truncateStr(sess.name, 12),
-					truncateStr(sess.bead, 10),
-					statusStr,
-					info)
-				s += line + "\n"
+				s += "  " + line + "\n"
 			}
+		}
+
+		// Detail card for selected session
+		if m.cursor < len(m.sessions) {
+			sess := m.sessions[m.cursor]
+			s += "\n"
+
+			// Build card content
+			var cardContent string
+			cardContent += cardTitleStyle.Render(sess.name) + "\n"
+			cardContent += cardLabelStyle.Render("Bead:    ") + cardValueStyle.Render(sess.bead) + "\n"
+			cardContent += cardLabelStyle.Render("Project: ") + cardValueStyle.Render(sess.project) + "\n"
+			cardContent += cardLabelStyle.Render("Status:  ") + m.renderStatus(sess.status) + "\n"
+			if sess.message != "" {
+				cardContent += cardLabelStyle.Render("Message: ") + cardValueStyle.Render(sess.message) + "\n"
+			}
+			if sess.idle > 0 {
+				idleStr := fmt.Sprintf("%dm", sess.idle)
+				if sess.idle >= 60 {
+					idleStr = fmt.Sprintf("%dh %dm", sess.idle/60, sess.idle%60)
+				}
+				cardContent += cardLabelStyle.Render("Idle:    ") + cardValueStyle.Render(idleStr) + "\n"
+			}
+
+			s += cardStyle.Render(cardContent)
 		}
 	}
 
-	// Help
-	s += "\n" + helpStyle.Render("↑/↓ navigate • enter switch • r refresh • q quit")
+	// Help - vertical
+	s += "\n\n"
+	s += helpStyle.Render("↑/↓  navigate") + "\n"
+	s += helpStyle.Render("enter  switch to session") + "\n"
+	s += helpStyle.Render("r  refresh") + "\n"
+	s += helpStyle.Render("q  quit")
 
 	return s
+}
+
+// renderStatus returns a styled status string
+func (m watchModel) renderStatus(status string) string {
+	switch status {
+	case "working":
+		return statusWorkingStyle.Render(status)
+	case "idle":
+		return statusIdleStyle.Render(status)
+	case "ready":
+		return statusReadyStyle.Render(status)
+	case "blocked":
+		return statusBlockedStyle.Render(status)
+	case "error":
+		return statusErrorStyle.Render(status)
+	default:
+		return normalStyle.Render(status)
+	}
 }
 
 // Helper to truncate strings
