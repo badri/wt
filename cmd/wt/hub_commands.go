@@ -324,10 +324,16 @@ func cmdSeance(cfg *config.Config, args []string) error {
 	// Parse flags
 	sessionName := args[0]
 	var prompt string
+	var spawn bool
 	for i := 1; i < len(args); i++ {
-		if args[i] == "-p" && i+1 < len(args) {
-			prompt = args[i+1]
-			break
+		switch args[i] {
+		case "-p":
+			if i+1 < len(args) {
+				prompt = args[i+1]
+				i++
+			}
+		case "--spawn":
+			spawn = true
 		}
 	}
 
@@ -346,8 +352,13 @@ func cmdSeance(cfg *config.Config, args []string) error {
 		return cmdSeanceQuery(event, prompt)
 	}
 
-	// Resume session
-	return cmdSeanceResume(event)
+	if spawn {
+		// Spawn new tmux session for seance
+		return cmdSeanceSpawn(cfg, event)
+	}
+
+	// Resume session (opens in new pane)
+	return cmdSeanceResume(cfg, event)
 }
 
 func cmdSeanceList(logger *events.Logger) error {
@@ -405,25 +416,65 @@ func cmdSeanceList(logger *events.Logger) error {
 
 	printTable("Past Sessions (seance)", columns, rows)
 	fmt.Println("\n💬 = Worker session   🏠 = Hub session")
-	fmt.Println("\nCommands: wt seance <name> | wt seance <name> -p 'query' | wt seance hub")
+	fmt.Println("\nCommands:")
+	fmt.Println("  wt seance <name>          Resume in new pane (safe from hub)")
+	fmt.Println("  wt seance <name> --spawn  Spawn new tmux session")
+	fmt.Println("  wt seance <name> -p 'q'   One-shot query")
 
 	return nil
 }
 
-func cmdSeanceResume(event *events.Event) error {
+func cmdSeanceResume(cfg *config.Config, event *events.Event) error {
 	if event.Type == events.EventHubHandoff {
-		fmt.Printf("Resuming hub session...\n")
+		fmt.Printf("Resuming hub session in new pane...\n")
 	} else {
-		fmt.Printf("Resuming Claude session for '%s' (bead: %s)...\n", event.Session, event.Bead)
+		fmt.Printf("Resuming '%s' (bead: %s) in new pane...\n", event.Session, event.Bead)
 	}
 
-	// Run claude with --resume flag
-	cmd := exec.Command("claude", "--resume", event.ClaudeSession)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	// Check if we're in tmux
+	if os.Getenv("TMUX") == "" {
+		// Not in tmux - fall back to direct resume (replaces current process)
+		fmt.Println("Note: Not in tmux, resuming in current terminal")
+		cmd := exec.Command("claude", "--resume", event.ClaudeSession)
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		return cmd.Run()
+	}
 
+	// Open in new tmux window and run claude --resume
+	resumeCmd := fmt.Sprintf("claude --resume %s", event.ClaudeSession)
+	cmd := exec.Command("tmux", "new-window", "-n", "seance", resumeCmd)
 	return cmd.Run()
+}
+
+func cmdSeanceSpawn(cfg *config.Config, event *events.Event) error {
+	// Generate session name - prefix with "seance-" to avoid conflicts
+	sessionName := "seance-" + event.Session
+	if event.Type == events.EventHubHandoff {
+		sessionName = "seance-hub"
+	}
+
+	// Check if session already exists
+	if tmux.SessionExists(sessionName) {
+		fmt.Printf("Seance session '%s' already exists. Switching to it.\n", sessionName)
+		return tmux.Attach(sessionName)
+	}
+
+	// Get working directory
+	workdir := os.Getenv("HOME")
+	if event.WorktreePath != "" {
+		workdir = event.WorktreePath
+	}
+
+	fmt.Printf("Spawning seance session '%s' for past session '%s'...\n", sessionName, event.Session)
+
+	// Create the seance session
+	if err := tmux.NewSeanceSession(sessionName, workdir, event.ClaudeSession, true); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func cmdSeanceQuery(event *events.Event, prompt string) error {

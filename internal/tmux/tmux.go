@@ -63,6 +63,40 @@ func NewSession(name, workdir, beadsDir, editorCmd string, opts *SessionOptions)
 	return nil
 }
 
+// NewSeanceSession creates a tmux session for resuming a past Claude conversation.
+// It runs claude --resume in a new session, optionally switching to it.
+func NewSeanceSession(name, workdir, claudeSessionID string, switchTo bool) error {
+	// Check if session already exists
+	if SessionExists(name) {
+		return fmt.Errorf("tmux session '%s' already exists", name)
+	}
+
+	// Create tmux session in detached mode
+	cmd := exec.Command("tmux", "new-session",
+		"-d",       // detached
+		"-s", name, // session name
+		"-c", workdir, // working directory
+	)
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("creating tmux session: %w", err)
+	}
+
+	// Send the claude --resume command
+	resumeCmd := fmt.Sprintf("claude --resume %s", claudeSessionID)
+	sendCmd := exec.Command("tmux", "send-keys", "-t", name, resumeCmd, "Enter")
+	if err := sendCmd.Run(); err != nil {
+		return fmt.Errorf("starting claude resume: %w", err)
+	}
+
+	// Switch to the session if requested
+	if switchTo {
+		return Attach(name)
+	}
+
+	return nil
+}
+
 func Attach(name string) error {
 	// Check if we're inside tmux
 	if os.Getenv("TMUX") != "" {

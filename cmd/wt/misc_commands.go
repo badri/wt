@@ -527,7 +527,8 @@ HUB COMMANDS:
 
 HISTORY COMMANDS:
     wt seance               List past sessions for resumption
-    wt seance <name>        Resume conversation with past session
+    wt seance <name>        Resume in new tmux pane (safe from hub)
+    wt seance <name> --spawn  Spawn new tmux session for seance
     wt seance <name> -p 'q' One-shot query to past session
     wt events               Show event history
                             Options: --since <duration>, -f/--follow, -n <count>
