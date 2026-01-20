@@ -44,7 +44,7 @@ SEE ALSO:
 }
 
 func cmdProjects(cfg *config.Config) error {
-	return runProjectsTUI(cfg)
+	return printProjectsList(cfg)
 }
 
 func cmdProject(cfg *config.Config, args []string) error {
