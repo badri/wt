@@ -123,14 +123,24 @@ Attaches to the tmux session. Use `Ctrl-b d` to detach back to hub.
 ### Monitoring
 
 ```bash
-wt watch            # Live dashboard, refreshes every 30s
-wt watch --notify   # Desktop notifications on idle
+wt watch            # Interactive TUI dashboard
 ```
 
-Watch shows:
-- All active sessions with status
-- Idle detection (!! marker when idle >5 min)
-- PRs pending review
+**Watch TUI controls:**
+- `↑/↓` or `j/k` - Navigate between sessions
+- `Enter` - Switch to selected session
+- `r` - Refresh manually
+- `q` - Quit watch
+
+**Watch shows:**
+- All active sessions with color-coded status
+- Status: working (green), idle (yellow), ready (bright green), blocked/error (red)
+- Status message or idle time
+- Auto-refreshes every 5 seconds without flashing
+
+**Tmux pane navigation** (when watch is in side pane):
+- `Ctrl+b ←/→` - Switch between Claude and watch panes
+- `Ctrl+b o` - Cycle through panes
 
 ### Checking Session Status
 
@@ -623,7 +633,7 @@ Workers inherit `BEADS_DIR` from the project, so bd commands inside workers oper
 | `wt new <bead> --switch` | Spawn and switch to worker |
 | `wt new <bead> --no-test-env` | Spawn without test env setup |
 | `wt <name>` | Switch to session |
-| `wt watch` | Live monitoring |
+| `wt watch` | Interactive TUI (↑↓ navigate, Enter switch, q quit) |
 | `wt status` | Current session info (in worker) |
 | `wt signal ready "msg"` | Signal work complete (in worker) |
 | `wt signal blocked "msg"` | Signal blocked (in worker) |
