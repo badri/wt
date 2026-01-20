@@ -337,6 +337,11 @@ func cmdNew(cfg *config.Config, args []string) error {
 		fmt.Printf("Warning: %v (sending prompt anyway)\n", err)
 	}
 
+	// Accept the bypass permissions warning dialog if present
+	if err := tmux.AcceptBypassPermissionsWarning(sessionName); err != nil {
+		fmt.Printf("Warning: could not accept bypass warning: %v\n", err)
+	}
+
 	// Additional delay for Claude to fully initialize its UI
 	time.Sleep(2 * time.Second)
 

@@ -142,6 +142,57 @@ func WaitForClaude(session string, timeout time.Duration) error {
 	return fmt.Errorf("timeout waiting for Claude to start")
 }
 
+// CapturePane captures the visible content of a tmux session's pane.
+// Returns up to 'lines' lines of content from the pane.
+func CapturePane(session string, lines int) (string, error) {
+	cmd := exec.Command("tmux", "capture-pane", "-t", session, "-p", "-S", fmt.Sprintf("-%d", lines))
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("capturing pane: %w", err)
+	}
+	return string(output), nil
+}
+
+// AcceptBypassPermissionsWarning dismisses the Claude Code bypass permissions warning dialog.
+// When Claude starts with --dangerously-skip-permissions, it shows a warning dialog that
+// requires pressing Down arrow to select "Yes, I accept" and then Enter to confirm.
+// This function checks if the warning is present before sending keys.
+//
+// Call this after WaitForClaude, but before sending any prompts.
+func AcceptBypassPermissionsWarning(session string) error {
+	// Wait for the dialog to potentially render
+	time.Sleep(1 * time.Second)
+
+	// Check if the bypass permissions warning is present
+	content, err := CapturePane(session, 30)
+	if err != nil {
+		return err
+	}
+
+	// Look for the characteristic warning text
+	if !strings.Contains(content, "Bypass Permissions mode") {
+		// Warning not present, nothing to do
+		return nil
+	}
+
+	// Press Down to select "Yes, I accept" (option 2)
+	downCmd := exec.Command("tmux", "send-keys", "-t", session, "Down")
+	if err := downCmd.Run(); err != nil {
+		return fmt.Errorf("sending Down key: %w", err)
+	}
+
+	// Small delay to let selection update
+	time.Sleep(200 * time.Millisecond)
+
+	// Press Enter to confirm
+	enterCmd := exec.Command("tmux", "send-keys", "-t", session, "Enter")
+	if err := enterCmd.Run(); err != nil {
+		return fmt.Errorf("sending Enter key: %w", err)
+	}
+
+	return nil
+}
+
 func Kill(name string) error {
 	cmd := exec.Command("tmux", "kill-session", "-t", name)
 	return cmd.Run()
