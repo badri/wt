@@ -31,3 +31,11 @@
    - New commands users should know about: Update skill description
    - Changed command syntax: Update skill examples
    - Internal improvements: No skill update needed
+
+7. **When Cutting a Release**:
+   - Review commits since last release: `git log --oneline --since="<last-release-date>" | grep -v "bd sync"`
+   - Update CHANGELOG.md based on actual commits, not memory
+   - Move [Unreleased] items to new version section with date
+   - Follow Keep a Changelog format (Added, Changed, Fixed, Removed)
+   - Tag with semantic version (vX.Y.Z)
+   - Push tag: `git tag vX.Y.Z && git push origin vX.Y.Z`

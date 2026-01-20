@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-01-20
+
+### Added
+- MkDocs Material documentation site with GitHub Pages deployment
+- `--json` flag for machine-readable output on list commands
+- Bead title display in `wt list`, `wt watch`, and `wt pick`
+- Audio alerts for macOS notifications on session completion
+- Detailed help for all commands with `-h/--help` support
+- Bubbletea-based TUI for `wt watch` with detail card and keyboard navigation
+- Bubbletea table components for `wt list`, `wt projects`, `wt events`, `wt seance`
+
+### Fixed
+- `wt watch` now runs TUI directly when not in a wt worker session
+- `wt watch` persists and accessible from worker sessions via popup
+- Cross-project bead titles display correctly (uses session's BeadsDir)
+- Initial prompt now correctly sent to worker sessions
+- Improved prompt delivery and watch pane control in hub
+
+### Changed
+- `wt list` columns: Name, Status, Title, Project (shows title instead of activity)
+- `wt watch` list shows title instead of bead ID
+- `wt pick` shows title in session picker
+- Improved CLI consistency for project commands
+- All listing commands use styled table output
+
 ## [0.2.0] - 2026-01-19
 
 ### Added
