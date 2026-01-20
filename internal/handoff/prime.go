@@ -48,8 +48,8 @@ func Prime(cfg *config.Config, opts *PrimeOptions) (*PrimeResult, error) {
 		}
 	}
 
-	// 2. Get handoff content from bead
-	content, err := GetHandoffContent()
+	// 2. Get handoff content from file
+	content, err := GetHandoffContent(cfg)
 	if err != nil {
 		fmt.Printf("Warning: could not get handoff content: %v\n", err)
 	}
@@ -207,10 +207,12 @@ func QuickPrime(cfg *config.Config) error {
 	}
 
 	// Get handoff content
-	content, _ := GetHandoffContent()
+	content, _ := GetHandoffContent(cfg)
 	if content != "" {
 		fmt.Println("## Handoff Notes")
 		fmt.Println(content)
+		// Archive after displaying
+		ClearHandoffContent(cfg)
 	}
 
 	return nil

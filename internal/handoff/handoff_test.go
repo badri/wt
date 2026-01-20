@@ -283,10 +283,13 @@ func TestConstants(t *testing.T) {
 	if HandoffMarkerFile != "handoff_marker" {
 		t.Errorf("unexpected HandoffMarkerFile: %s", HandoffMarkerFile)
 	}
-	if HandoffBeadTitle != "Hub Handoff" {
-		t.Errorf("unexpected HandoffBeadTitle: %s", HandoffBeadTitle)
+	if HandoffFile != "handoff.md" {
+		t.Errorf("unexpected HandoffFile: %s", HandoffFile)
 	}
 	if RuntimeDir != ".wt" {
 		t.Errorf("unexpected RuntimeDir: %s", RuntimeDir)
+	}
+	if SeanceHubPrefix != "seance-hub-" {
+		t.Errorf("unexpected SeanceHubPrefix: %s", SeanceHubPrefix)
 	}
 }

@@ -452,10 +452,12 @@ func cmdSeanceSpawn(cfg *config.Config, event *events.Event) error {
 	// Generate session name - prefix with "seance-" to avoid conflicts
 	sessionName := "seance-" + event.Session
 	if event.Type == events.EventHubHandoff {
-		sessionName = "seance-hub"
+		// Use timestamp for hub seances to allow multiple past hubs
+		timestamp := time.Now().Format("20060102-1504")
+		sessionName = "seance-hub-" + timestamp
 	}
 
-	// Check if session already exists
+	// Check if session already exists (for hub, this is unlikely due to timestamp)
 	if tmux.SessionExists(sessionName) {
 		fmt.Printf("Seance session '%s' already exists. Switching to it.\n", sessionName)
 		return tmux.Attach(sessionName)
@@ -547,6 +549,14 @@ func cmdPrime(cfg *config.Config, args []string) error {
 	}
 
 	handoff.OutputPrimeResult(result)
+
+	// Archive handoff file after displaying (renames handoff.md to handoff-<timestamp>.md)
+	if result.HandoffContent != "" {
+		if err := handoff.ClearHandoffContent(cfg); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not archive handoff file: %v\n", err)
+		}
+	}
+
 	return nil
 }
 

@@ -21,11 +21,14 @@ const (
 	// HandoffMarkerFile is the name of the marker file written before respawn
 	HandoffMarkerFile = "handoff_marker"
 
-	// HandoffBeadTitle is the title used for the pinned handoff bead
-	HandoffBeadTitle = "Hub Handoff"
+	// HandoffFile is the current handoff context file
+	HandoffFile = "handoff.md"
 
 	// RuntimeDir is the directory for runtime state files
 	RuntimeDir = ".wt"
+
+	// SeanceHubPrefix is the prefix for seance hub sessions
+	SeanceHubPrefix = "seance-hub-"
 )
 
 // Options configures handoff behavior
@@ -53,6 +56,9 @@ func Run(cfg *config.Config, opts *Options) (*Result, error) {
 	}
 	result.Message = context
 
+	// Determine handoff file path based on session type
+	handoffPath := getHandoffFilePath(cfg)
+
 	// Dry run - just show what would happen
 	if opts.DryRun {
 		fmt.Println("=== Handoff Dry Run ===")
@@ -61,20 +67,18 @@ func Run(cfg *config.Config, opts *Options) (*Result, error) {
 		fmt.Println()
 		fmt.Println(context)
 		fmt.Println("Would:")
-		fmt.Println("  1. Update/create handoff bead with above content")
+		fmt.Println("  1. Write handoff context to", handoffPath)
 		fmt.Println("  2. Write handoff marker to", filepath.Join(cfg.ConfigDir(), RuntimeDir, HandoffMarkerFile))
 		fmt.Println("  3. Clear tmux history")
 		fmt.Println("  4. Respawn Claude via tmux respawn-pane")
 		return result, nil
 	}
 
-	// 2. Update or create handoff bead
-	if err := updateHandoffBead(context); err != nil {
-		// Non-fatal - continue with handoff even if bead update fails
-		fmt.Fprintf(os.Stderr, "Warning: could not update handoff bead: %v\n", err)
-	} else {
-		result.BeadUpdated = true
+	// 2. Write handoff context to file
+	if err := writeHandoffFile(handoffPath, context); err != nil {
+		return nil, fmt.Errorf("writing handoff file: %w", err)
 	}
+	result.BeadUpdated = true // Reusing field to indicate file written
 
 	// 3. Write handoff marker
 	if err := writeMarker(cfg); err != nil {
@@ -153,48 +157,91 @@ func collectContext(cfg *config.Config, opts *Options) (string, error) {
 	return sb.String(), nil
 }
 
-// updateHandoffBead updates or creates the pinned handoff bead
-func updateHandoffBead(content string) error {
-	// Find existing handoff bead
-	beadID, err := findHandoffBead()
+// getTmuxSessionName returns the current tmux session name
+func getTmuxSessionName() string {
+	cmd := exec.Command("tmux", "display-message", "-p", "#S")
+	output, err := cmd.Output()
 	if err != nil {
-		// Create new handoff bead
-		beadID, err = createHandoffBead()
-		if err != nil {
-			return fmt.Errorf("creating handoff bead: %w", err)
-		}
+		return ""
 	}
-
-	// Update the bead's description with the context
-	return bead.UpdateDescription(beadID, content)
+	return strings.TrimSpace(string(output))
 }
 
-// findHandoffBead looks for an existing handoff bead
-func findHandoffBead() (string, error) {
-	// Search for bead with title "Hub Handoff"
-	beads, err := bead.Search(HandoffBeadTitle)
+// isSeanceHubSession checks if we're in a seance hub session
+func isSeanceHubSession() bool {
+	sessionName := getTmuxSessionName()
+	return strings.HasPrefix(sessionName, SeanceHubPrefix)
+}
+
+// getSeanceTimestamp extracts timestamp from seance-hub-YYYYMMDD-HHMM session name
+func getSeanceTimestamp() string {
+	sessionName := getTmuxSessionName()
+	if strings.HasPrefix(sessionName, SeanceHubPrefix) {
+		return strings.TrimPrefix(sessionName, SeanceHubPrefix)
+	}
+	return ""
+}
+
+// getHandoffFilePath returns the appropriate handoff file path
+// For active hub: handoff.md
+// For seance hub: handoff-<timestamp>.md
+func getHandoffFilePath(cfg *config.Config) string {
+	if isSeanceHubSession() {
+		timestamp := getSeanceTimestamp()
+		if timestamp != "" {
+			return filepath.Join(cfg.ConfigDir(), fmt.Sprintf("handoff-%s.md", timestamp))
+		}
+	}
+	return filepath.Join(cfg.ConfigDir(), HandoffFile)
+}
+
+// writeHandoffFile writes handoff context to the specified file
+func writeHandoffFile(path, content string) error {
+	// Ensure directory exists
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("creating directory: %w", err)
+	}
+
+	// Write content with header
+	header := fmt.Sprintf("# Hub Handoff Context\n\nGenerated: %s\n\n---\n\n",
+		time.Now().Format("2006-01-02 15:04:05"))
+	fullContent := header + content
+
+	return os.WriteFile(path, []byte(fullContent), 0644)
+}
+
+// ReadHandoffFile reads the current handoff.md file
+func ReadHandoffFile(cfg *config.Config) (string, error) {
+	path := filepath.Join(cfg.ConfigDir(), HandoffFile)
+	content, err := os.ReadFile(path)
 	if err != nil {
 		return "", err
 	}
-
-	for _, b := range beads {
-		if b.Title == HandoffBeadTitle {
-			return b.ID, nil
-		}
-	}
-
-	return "", fmt.Errorf("handoff bead not found")
+	return string(content), nil
 }
 
-// createHandoffBead creates a new pinned handoff bead
-func createHandoffBead() (string, error) {
-	opts := &bead.CreateOptions{
-		Description: "Persistent handoff context for hub sessions",
-		Type:        "task",
-		Priority:    4, // Low priority, just for tracking
+// ArchiveHandoffFile renames handoff.md to handoff-<timestamp>.md
+func ArchiveHandoffFile(cfg *config.Config) error {
+	src := filepath.Join(cfg.ConfigDir(), HandoffFile)
+	if _, err := os.Stat(src); os.IsNotExist(err) {
+		return nil // No file to archive
 	}
 
-	return bead.Create(HandoffBeadTitle, opts)
+	timestamp := time.Now().Format("20060102-1504")
+	dst := filepath.Join(cfg.ConfigDir(), fmt.Sprintf("handoff-%s.md", timestamp))
+
+	return os.Rename(src, dst)
+}
+
+// ListArchivedHandoffs returns list of archived handoff files
+func ListArchivedHandoffs(cfg *config.Config) ([]string, error) {
+	pattern := filepath.Join(cfg.ConfigDir(), "handoff-*.md")
+	matches, err := filepath.Glob(pattern)
+	if err != nil {
+		return nil, err
+	}
+	return matches, nil
 }
 
 // writeMarker writes the handoff marker file
@@ -304,29 +351,22 @@ func ClearMarker(cfg *config.Config) error {
 	return err
 }
 
-// GetHandoffContent retrieves the content from the handoff bead
-func GetHandoffContent() (string, error) {
-	beadID, err := findHandoffBead()
+// GetHandoffContent retrieves the content from handoff.md
+func GetHandoffContent(cfg *config.Config) (string, error) {
+	path := filepath.Join(cfg.ConfigDir(), HandoffFile)
+	content, err := os.ReadFile(path)
 	if err != nil {
-		return "", nil // No handoff bead is not an error
-	}
-
-	info, err := bead.ShowFull(beadID)
-	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil // No handoff file is not an error
+		}
 		return "", err
 	}
-
-	return info.Description, nil
+	return string(content), nil
 }
 
-// ClearHandoffContent clears the handoff bead content
-func ClearHandoffContent() error {
-	beadID, err := findHandoffBead()
-	if err != nil {
-		return nil // No handoff bead to clear
-	}
-
-	return bead.UpdateDescription(beadID, "")
+// ClearHandoffContent archives the handoff file after consumption
+func ClearHandoffContent(cfg *config.Config) error {
+	return ArchiveHandoffFile(cfg)
 }
 
 // IsInTmux checks if we're running inside tmux
