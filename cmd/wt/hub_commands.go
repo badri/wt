@@ -37,8 +37,13 @@ func parseHubFlags(args []string) *hub.Options {
 	return opts
 }
 
-// cmdWatch displays a live dashboard of all sessions
+// cmdWatch displays a live dashboard of all sessions using the TUI
 func cmdWatch(cfg *config.Config) error {
+	return cmdWatchTUI(cfg)
+}
+
+// cmdWatchLegacy displays the old-style dashboard (kept for reference)
+func cmdWatchLegacy(cfg *config.Config) error {
 	const refreshInterval = 2 * time.Second
 	const idleThreshold = 5 // minutes
 
