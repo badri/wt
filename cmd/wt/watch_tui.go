@@ -149,9 +149,9 @@ func loadSessionsCmd(cfg *config.Config) tea.Cmd {
 			}
 			idle := monitor.GetIdleMinutes(name)
 
-			// Get bead title
+			// Get bead title (use BeadsDir to find correct project)
 			title := ""
-			if beadInfo, err := bead.Show(sess.Bead); err == nil && beadInfo != nil {
+			if beadInfo, err := bead.ShowInDir(sess.Bead, sess.BeadsDir); err == nil && beadInfo != nil {
 				title = beadInfo.Title
 			}
 
@@ -285,15 +285,19 @@ func (m watchModel) View() string {
 				statusStr = normalStyle.Render("●")
 			}
 
-			// Format line - compact for narrow panes
+			// Format line - show name and title (or bead if no title)
+			displayTitle := sess.title
+			if displayTitle == "" {
+				displayTitle = sess.bead
+			}
 			line := fmt.Sprintf("%s %-14s %s",
 				statusStr,
 				truncateStr(sess.name, 14),
-				truncateStr(sess.bead, 12))
+				truncateStr(displayTitle, 20))
 
 			// Apply selection style
 			if i == m.cursor {
-				s += selectedStyle.Render("> "+truncateStr(sess.name, 14)+" "+truncateStr(sess.bead, 12)) + "\n"
+				s += selectedStyle.Render("> "+truncateStr(sess.name, 14)+" "+truncateStr(displayTitle, 20)) + "\n"
 			} else {
 				s += "  " + line + "\n"
 			}

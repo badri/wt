@@ -25,24 +25,46 @@ type ReadyBead struct {
 }
 
 func Show(beadID string) (*BeadInfo, error) {
+	return ShowInDir(beadID, "")
+}
+
+// ShowInDir returns bead info from a specific beads directory
+func ShowInDir(beadID, beadsDir string) (*BeadInfo, error) {
+	// Determine project directory
+	projectDir := ""
+	if beadsDir != "" {
+		projectDir = strings.TrimSuffix(beadsDir, "/.beads")
+		projectDir = strings.TrimSuffix(projectDir, ".beads")
+	}
+
 	// Run bd show to get bead info
 	cmd := exec.Command("bd", "show", beadID, "--json")
+	if projectDir != "" {
+		cmd.Dir = projectDir
+	}
 	output, err := cmd.Output()
 	if err != nil {
 		// bd show might not support --json, try parsing text output
-		return showFromText(beadID)
+		return showFromTextInDir(beadID, projectDir)
 	}
 
 	var info BeadInfo
 	if err := json.Unmarshal(output, &info); err != nil {
-		return showFromText(beadID)
+		return showFromTextInDir(beadID, projectDir)
 	}
 
 	return &info, nil
 }
 
 func showFromText(beadID string) (*BeadInfo, error) {
+	return showFromTextInDir(beadID, "")
+}
+
+func showFromTextInDir(beadID, projectDir string) (*BeadInfo, error) {
 	cmd := exec.Command("bd", "show", beadID)
+	if projectDir != "" {
+		cmd.Dir = projectDir
+	}
 	output, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("bead not found: %s", beadID)

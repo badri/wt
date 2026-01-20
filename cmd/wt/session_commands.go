@@ -181,9 +181,9 @@ func cmdList(cfg *config.Config) error {
 			status = "working"
 		}
 
-		// Get bead title
+		// Get bead title (use BeadsDir to find correct project)
 		title := ""
-		if beadInfo, err := bead.Show(sess.Bead); err == nil && beadInfo != nil {
+		if beadInfo, err := bead.ShowInDir(sess.Bead, sess.BeadsDir); err == nil && beadInfo != nil {
 			title = beadInfo.Title
 		}
 
