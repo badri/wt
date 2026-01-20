@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/charmbracelet/bubbles/table"
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/badri/wt/internal/config"
@@ -11,34 +12,7 @@ import (
 	"github.com/badri/wt/internal/session"
 )
 
-// Styles for projects list
-var (
-	projTitleStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("170"))
-
-	projHeaderStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("241")).
-			Bold(true)
-
-	projNameStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("229")).
-			Bold(true)
-
-	projRepoStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("252"))
-
-	projMergeModeStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("42"))
-
-	projSessionStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("226"))
-
-	projDimStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("241"))
-)
-
-// printProjectsList prints a styled list of projects
+// printProjectsList prints a styled table of projects
 func printProjectsList(cfg *config.Config) error {
 	mgr := project.NewManager(cfg)
 	projects, err := mgr.List()
@@ -47,8 +21,9 @@ func printProjectsList(cfg *config.Config) error {
 	}
 
 	if len(projects) == 0 {
-		fmt.Println(projDimStyle.Render("No projects registered."))
-		fmt.Println(projDimStyle.Render("\nRegister a project: wt project add <name> <path>"))
+		dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+		fmt.Println(dimStyle.Render("No projects registered."))
+		fmt.Println(dimStyle.Render("\nRegister a project: wt project add <name> <path>"))
 		return nil
 	}
 
@@ -64,42 +39,67 @@ func printProjectsList(cfg *config.Config) error {
 		return projects[i].Name < projects[j].Name
 	})
 
-	// Title
-	fmt.Println(projTitleStyle.Render("Projects"))
-	fmt.Println()
-
-	// Header
-	fmt.Printf("  %s  %s  %s  %s\n",
-		projHeaderStyle.Render(fmt.Sprintf("%-16s", "Name")),
-		projHeaderStyle.Render(fmt.Sprintf("%-24s", "Repo")),
-		projHeaderStyle.Render(fmt.Sprintf("%-12s", "Merge Mode")),
-		projHeaderStyle.Render("Sessions"))
-
-	// Projects
-	for _, proj := range projects {
-		count := sessionCount[proj.Name]
-		countStr := projDimStyle.Render("-")
-		if count > 0 {
-			countStr = projSessionStyle.Render(fmt.Sprintf("%d", count))
-		}
-
-		repoStr := projDimStyle.Render("-")
-		if proj.Repo != "" {
-			repoStr = projRepoStyle.Render(truncate(proj.Repo, 24))
-		}
-
-		modeStr := projMergeModeStyle.Render(proj.MergeMode)
-		if proj.MergeMode == "" {
-			modeStr = projDimStyle.Render("pr-review")
-		}
-
-		fmt.Printf("  %s  %s  %s  %s\n",
-			projNameStyle.Render(fmt.Sprintf("%-16s", truncate(proj.Name, 16))),
-			fmt.Sprintf("%-24s", repoStr),
-			fmt.Sprintf("%-12s", modeStr),
-			countStr)
+	// Define columns
+	columns := []table.Column{
+		{Title: "Name", Width: 16},
+		{Title: "Repo", Width: 28},
+		{Title: "Merge Mode", Width: 12},
+		{Title: "Sessions", Width: 10},
 	}
 
+	// Build rows
+	var rows []table.Row
+	for _, proj := range projects {
+		count := sessionCount[proj.Name]
+		countStr := "-"
+		if count > 0 {
+			countStr = fmt.Sprintf("%d", count)
+		}
+
+		repoStr := "-"
+		if proj.Repo != "" {
+			repoStr = truncate(proj.Repo, 28)
+		}
+
+		modeStr := proj.MergeMode
+		if modeStr == "" {
+			modeStr = "pr-review"
+		}
+
+		rows = append(rows, table.Row{
+			proj.Name,
+			repoStr,
+			modeStr,
+			countStr,
+		})
+	}
+
+	// Create table
+	t := table.New(
+		table.WithColumns(columns),
+		table.WithRows(rows),
+		table.WithHeight(len(rows)+1),
+	)
+
+	// Style the table
+	s := table.DefaultStyles()
+	s.Header = s.Header.
+		BorderStyle(lipgloss.NormalBorder()).
+		BorderForeground(lipgloss.Color("240")).
+		BorderBottom(true).
+		Bold(true).
+		Foreground(lipgloss.Color("229"))
+	s.Selected = lipgloss.NewStyle() // No selection highlighting for static display
+	s.Cell = s.Cell.Foreground(lipgloss.Color("252"))
+	t.SetStyles(s)
+
+	// Title
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("170"))
+	fmt.Println(titleStyle.Render("Projects"))
 	fmt.Println()
+
+	// Render table
+	fmt.Println(t.View())
+
 	return nil
 }
