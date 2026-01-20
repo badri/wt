@@ -5,6 +5,8 @@ import (
 	"os"
 	"os/exec"
 
+	"github.com/charmbracelet/bubbles/table"
+
 	"github.com/badri/wt/internal/bead"
 	"github.com/badri/wt/internal/config"
 	"github.com/badri/wt/internal/project"
@@ -199,12 +201,11 @@ func cmdReady(cfg *config.Config, projectFilter string) error {
 	}
 
 	if len(allBeads) == 0 {
+		msg := "No ready beads across all projects."
 		if projectFilter != "" {
-			fmt.Printf("No ready beads for project '%s'.\n", projectFilter)
-		} else {
-			fmt.Println("No ready beads across all projects.")
+			msg = fmt.Sprintf("No ready beads for project '%s'.", projectFilter)
 		}
-		fmt.Println("\nAll caught up!")
+		printEmptyMessage(msg, "All caught up!")
 		return nil
 	}
 
@@ -213,27 +214,27 @@ func cmdReady(cfg *config.Config, projectFilter string) error {
 		title = fmt.Sprintf("Ready Work (%s)", projectFilter)
 	}
 
-	fmt.Printf("┌─ %s ", title)
-	padding := 71 - len(title) - 4
-	for i := 0; i < padding; i++ {
-		fmt.Print("─")
+	// Define columns
+	columns := []table.Column{
+		{Title: "Bead", Width: 16},
+		{Title: "Title", Width: 40},
+		{Title: "Type", Width: 8},
+		{Title: "Priority", Width: 8},
 	}
-	fmt.Println("┐")
-	fmt.Println("│                                                                       │")
-	fmt.Printf("│  %-14s %-36s %-6s %-8s │\n", "Bead", "Title", "Type", "Priority")
-	fmt.Printf("│  %-14s %-36s %-6s %-8s │\n", "────", "─────", "────", "────────")
 
+	// Build rows
+	var rows []table.Row
 	for _, b := range allBeads {
 		priority := fmt.Sprintf("P%d", b.Priority)
-		fmt.Printf("│  %-14s %-36s %-6s %-8s │\n",
-			truncate(b.ID, 14),
-			truncate(b.Title, 36),
-			truncate(b.IssueType, 6),
-			priority)
+		rows = append(rows, table.Row{
+			b.ID,
+			truncate(b.Title, 40),
+			b.IssueType,
+			priority,
+		})
 	}
 
-	fmt.Println("│                                                                       │")
-	fmt.Println("└───────────────────────────────────────────────────────────────────────┘")
+	printTable(title, columns, rows)
 	fmt.Printf("\n%d bead(s) ready. Start with: wt new <bead>\n", len(allBeads))
 
 	return nil
@@ -342,7 +343,7 @@ func cmdBeads(cfg *config.Config, projectName string, flags beadsFlags) error {
 		if flags.status != "" {
 			statusMsg = fmt.Sprintf(" with status '%s'", flags.status)
 		}
-		fmt.Printf("No beads%s in project '%s'.\n", statusMsg, projectName)
+		printEmptyMessage(fmt.Sprintf("No beads%s in project '%s'.", statusMsg, projectName), "")
 		return nil
 	}
 
@@ -351,27 +352,27 @@ func cmdBeads(cfg *config.Config, projectName string, flags beadsFlags) error {
 		title = fmt.Sprintf("Beads (%s, %s)", projectName, flags.status)
 	}
 
-	fmt.Printf("┌─ %s ", title)
-	padding := 71 - len(title) - 4
-	for i := 0; i < padding; i++ {
-		fmt.Print("─")
+	// Define columns
+	columns := []table.Column{
+		{Title: "Bead", Width: 16},
+		{Title: "Title", Width: 40},
+		{Title: "Type", Width: 8},
+		{Title: "Priority", Width: 8},
 	}
-	fmt.Println("┐")
-	fmt.Println("│                                                                       │")
-	fmt.Printf("│  %-14s %-38s %-6s %-8s │\n", "Bead", "Title", "Type", "Priority")
-	fmt.Printf("│  %-14s %-38s %-6s %-8s │\n", "────", "─────", "────", "────────")
 
+	// Build rows
+	var rows []table.Row
 	for _, b := range beads {
 		priority := fmt.Sprintf("P%d", b.Priority)
-		fmt.Printf("│  %-14s %-38s %-6s %-8s │\n",
-			truncate(b.ID, 14),
-			truncate(b.Title, 38),
-			truncate(b.IssueType, 6),
-			priority)
+		rows = append(rows, table.Row{
+			b.ID,
+			truncate(b.Title, 40),
+			b.IssueType,
+			priority,
+		})
 	}
 
-	fmt.Println("│                                                                       │")
-	fmt.Println("└───────────────────────────────────────────────────────────────────────┘")
+	printTable(title, columns, rows)
 	fmt.Printf("\n%d bead(s) found.\n", len(beads))
 
 	return nil

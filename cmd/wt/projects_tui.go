@@ -5,7 +5,6 @@ import (
 	"sort"
 
 	"github.com/charmbracelet/bubbles/table"
-	"github.com/charmbracelet/lipgloss"
 
 	"github.com/badri/wt/internal/config"
 	"github.com/badri/wt/internal/project"
@@ -21,9 +20,7 @@ func printProjectsList(cfg *config.Config) error {
 	}
 
 	if len(projects) == 0 {
-		dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
-		fmt.Println(dimStyle.Render("No projects registered."))
-		fmt.Println(dimStyle.Render("\nRegister a project: wt project add <name> <path>"))
+		printEmptyMessage("No projects registered.", "Register a project: wt project add <name> <path>")
 		return nil
 	}
 
@@ -74,32 +71,6 @@ func printProjectsList(cfg *config.Config) error {
 		})
 	}
 
-	// Create table
-	t := table.New(
-		table.WithColumns(columns),
-		table.WithRows(rows),
-		table.WithHeight(len(rows)+1),
-	)
-
-	// Style the table
-	s := table.DefaultStyles()
-	s.Header = s.Header.
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color("240")).
-		BorderBottom(true).
-		Bold(true).
-		Foreground(lipgloss.Color("229"))
-	s.Selected = lipgloss.NewStyle() // No selection highlighting for static display
-	s.Cell = s.Cell.Foreground(lipgloss.Color("252"))
-	t.SetStyles(s)
-
-	// Title
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("170"))
-	fmt.Println(titleStyle.Render("Projects"))
-	fmt.Println()
-
-	// Render table
-	fmt.Println(t.View())
-
+	printTable("Projects", columns, rows)
 	return nil
 }

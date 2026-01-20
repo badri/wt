@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/table"
+
 	"github.com/badri/wt/internal/bead"
 	"github.com/badri/wt/internal/config"
 	"github.com/badri/wt/internal/events"
@@ -122,35 +124,38 @@ func cmdList(cfg *config.Config) error {
 	}
 
 	if len(state.Sessions) == 0 {
-		fmt.Println("No active sessions.")
-		fmt.Println("\nCommands: wt new <bead> | wt <name> (switch)")
+		printEmptyMessage("No active sessions.", "Commands: wt new <bead> | wt <name> (switch)")
 		return nil
 	}
 
-	fmt.Println("┌─ Active Sessions ─────────────────────────────────────────────────────┐")
-	fmt.Println("│                                                                       │")
-	fmt.Printf("│  %-10s %-18s %-10s %-14s %-15s │\n", "Name", "Bead", "Status", "Last Activity", "Project")
-	fmt.Printf("│  %-10s %-18s %-10s %-14s %-15s │\n", "────", "────", "──────", "─────────────", "───────")
+	// Define columns
+	columns := []table.Column{
+		{Title: "Name", Width: 12},
+		{Title: "Bead", Width: 18},
+		{Title: "Status", Width: 10},
+		{Title: "Activity", Width: 12},
+		{Title: "Project", Width: 16},
+	}
 
+	// Build rows
+	var rows []table.Row
 	for name, sess := range state.Sessions {
 		status := sess.Status
 		if status == "" {
 			status = "working"
 		}
-		statusIcon := "🟢"
-		if status == "idle" {
-			statusIcon = "🟡"
-		} else if status == "error" {
-			statusIcon = "🔴"
-		}
 
 		lastActivity := formatDuration(sess.LastActivity)
-		fmt.Printf("│  %s %-8s %-18s %-10s %-14s %-15s │\n",
-			statusIcon, name, truncate(sess.Bead, 18), status, lastActivity, truncate(sess.Project, 15))
+		rows = append(rows, table.Row{
+			name,
+			truncate(sess.Bead, 18),
+			status,
+			lastActivity,
+			truncate(sess.Project, 16),
+		})
 	}
 
-	fmt.Println("│                                                                       │")
-	fmt.Println("└───────────────────────────────────────────────────────────────────────┘")
+	printTable("Active Sessions", columns, rows)
 	fmt.Println("\nCommands: wt <name> (switch) | wt new <bead> | wt close <name>")
 
 	return nil
