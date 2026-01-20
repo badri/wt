@@ -37,9 +37,35 @@ func parseHubFlags(args []string) *hub.Options {
 	return opts
 }
 
-// cmdWatch displays a live dashboard of all sessions using the TUI
+// cmdWatch displays a live dashboard of all sessions using the TUI.
+// When run from a worker session (not hub), it uses tmux popup to show the watch.
 func cmdWatch(cfg *config.Config) error {
-	return cmdWatchTUI(cfg)
+	// If we're already in a popup context, run directly
+	if os.Getenv("WT_WATCH_POPUP") == "1" {
+		return cmdWatchTUI(cfg)
+	}
+
+	// Check if we're in the hub session
+	if hub.IsInHub() {
+		// In hub - run TUI directly
+		return cmdWatchTUI(cfg)
+	}
+
+	// In worker session - use tmux popup for overlay
+	return cmdWatchPopup()
+}
+
+// cmdWatchPopup shows watch in a tmux popup overlay
+func cmdWatchPopup() error {
+	// Use tmux popup to show watch as a floating overlay
+	// -E closes popup when command exits
+	// -w and -h set the size
+	// Set WT_WATCH_POPUP to prevent recursion
+	cmd := exec.Command("tmux", "popup", "-E", "-w", "50%", "-h", "80%", "-e", "WT_WATCH_POPUP=1", "wt", "watch")
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
 }
 
 // cmdWatchLegacy displays the old-style dashboard (kept for reference)

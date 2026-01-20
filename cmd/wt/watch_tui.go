@@ -111,19 +111,19 @@ type sessionItem struct {
 
 // Model
 type watchModel struct {
-	cfg           *config.Config
-	sessions      []sessionItem
-	cursor        int
-	width         int
-	height        int
-	lastRefresh   time.Time
-	switchTo      string // Session to switch to on quit
-	quitting      bool
+	cfg         *config.Config
+	sessions    []sessionItem
+	cursor      int
+	width       int
+	height      int
+	lastRefresh time.Time
+	quitting    bool
 }
 
 // Messages
 type tickMsg time.Time
 type sessionsMsg []sessionItem
+type switchedMsg struct{ err error }
 
 // Commands
 func tickCmd() tea.Cmd {
@@ -166,6 +166,15 @@ func loadSessionsCmd(cfg *config.Config) tea.Cmd {
 	}
 }
 
+func switchSessionCmd(sessionName string) tea.Cmd {
+	return func() tea.Msg {
+		// Use tmux switch-client to switch to the selected session
+		// This keeps the watch TUI running in its pane
+		err := tmux.SwitchClient(sessionName)
+		return switchedMsg{err: err}
+	}
+}
+
 // Initialize model
 func newWatchModel(cfg *config.Config) watchModel {
 	return watchModel{
@@ -200,9 +209,10 @@ func (m watchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case key.Matches(msg, keys.Enter):
 			if len(m.sessions) > 0 && m.cursor < len(m.sessions) {
-				m.switchTo = m.sessions[m.cursor].name
-				m.quitting = true
-				return m, tea.Quit
+				// Switch to the selected session without quitting
+				// The watch continues running in its pane
+				sessionName := m.sessions[m.cursor].name
+				return m, switchSessionCmd(sessionName)
 			}
 
 		case key.Matches(msg, keys.Refresh):
@@ -223,6 +233,10 @@ func (m watchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.cursor >= len(m.sessions) && len(m.sessions) > 0 {
 			m.cursor = len(m.sessions) - 1
 		}
+
+	case switchedMsg:
+		// Session switch completed, continue running
+		// (ignore any error - user will see it when they can't switch)
 	}
 
 	return m, nil
@@ -342,34 +356,15 @@ func truncateStr(s string, max int) string {
 }
 
 // Run the watch TUI
-func runWatchTUI(cfg *config.Config) (string, error) {
+func runWatchTUI(cfg *config.Config) error {
 	m := newWatchModel(cfg)
 	p := tea.NewProgram(m, tea.WithAltScreen())
 
-	finalModel, err := p.Run()
-	if err != nil {
-		return "", err
-	}
-
-	// Return the session to switch to (if any)
-	if fm, ok := finalModel.(watchModel); ok {
-		return fm.switchTo, nil
-	}
-
-	return "", nil
+	_, err := p.Run()
+	return err
 }
 
 // cmdWatchTUI runs the new watch TUI
 func cmdWatchTUI(cfg *config.Config) error {
-	switchTo, err := runWatchTUI(cfg)
-	if err != nil {
-		return err
-	}
-
-	// If user selected a session, switch to it
-	if switchTo != "" {
-		return tmux.Attach(switchTo)
-	}
-
-	return nil
+	return runWatchTUI(cfg)
 }

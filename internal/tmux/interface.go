@@ -5,6 +5,7 @@ package tmux
 type Runner interface {
 	NewSession(name, workdir, beadsDir, editorCmd string, opts *SessionOptions) error
 	Attach(name string) error
+	SwitchClient(name string) error
 	Kill(name string) error
 	SessionExists(name string) bool
 	ListSessions() ([]string, error)
@@ -19,6 +20,10 @@ func (r *DefaultRunner) NewSession(name, workdir, beadsDir, editorCmd string, op
 
 func (r *DefaultRunner) Attach(name string) error {
 	return Attach(name)
+}
+
+func (r *DefaultRunner) SwitchClient(name string) error {
+	return SwitchClient(name)
 }
 
 func (r *DefaultRunner) Kill(name string) error {

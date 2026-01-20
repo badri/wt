@@ -91,6 +91,43 @@ func TestMockRunner_Attach_NotFound(t *testing.T) {
 	}
 }
 
+func TestMockRunner_SwitchClient(t *testing.T) {
+	mock := NewMockRunner()
+	mock.AddSession("test", "/tmp", "/tmp")
+
+	err := mock.SwitchClient("test")
+	if err != nil {
+		t.Fatalf("SwitchClient failed: %v", err)
+	}
+
+	if !mock.SwitchClientCalled {
+		t.Error("SwitchClientCalled should be true")
+	}
+	if mock.SwitchClientTo != "test" {
+		t.Errorf("expected SwitchClientTo 'test', got %q", mock.SwitchClientTo)
+	}
+}
+
+func TestMockRunner_SwitchClient_NotFound(t *testing.T) {
+	mock := NewMockRunner()
+
+	err := mock.SwitchClient("nonexistent")
+	if err == nil {
+		t.Error("expected error for nonexistent session")
+	}
+}
+
+func TestMockRunner_SwitchClient_ConfiguredError(t *testing.T) {
+	mock := NewMockRunner()
+	mock.AddSession("test", "/tmp", "/tmp")
+	mock.SwitchClientErr = errors.New("forced error")
+
+	err := mock.SwitchClient("test")
+	if err == nil {
+		t.Error("expected configured error")
+	}
+}
+
 func TestMockRunner_Kill(t *testing.T) {
 	mock := NewMockRunner()
 	mock.AddSession("test", "/tmp", "/tmp")

@@ -4,15 +4,18 @@ import "fmt"
 
 // MockRunner is a mock implementation of Runner for testing.
 type MockRunner struct {
-	Sessions       map[string]MockSession
-	NewSessionErr  error
-	AttachErr      error
-	KillErr        error
-	ListErr        error
-	AttachCalled   bool
-	AttachedTo     string
-	KillCalled     bool
-	KilledSession  string
+	Sessions          map[string]MockSession
+	NewSessionErr     error
+	AttachErr         error
+	SwitchClientErr   error
+	KillErr           error
+	ListErr           error
+	AttachCalled      bool
+	AttachedTo        string
+	SwitchClientCalled bool
+	SwitchClientTo    string
+	KillCalled        bool
+	KilledSession     string
 }
 
 // MockSession represents a mock tmux session.
@@ -61,6 +64,20 @@ func (m *MockRunner) Attach(name string) error {
 
 	if m.AttachErr != nil {
 		return m.AttachErr
+	}
+
+	if _, exists := m.Sessions[name]; !exists {
+		return fmt.Errorf("session '%s' not found", name)
+	}
+	return nil
+}
+
+func (m *MockRunner) SwitchClient(name string) error {
+	m.SwitchClientCalled = true
+	m.SwitchClientTo = name
+
+	if m.SwitchClientErr != nil {
+		return m.SwitchClientErr
 	}
 
 	if _, exists := m.Sessions[name]; !exists {

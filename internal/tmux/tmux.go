@@ -81,6 +81,14 @@ func Attach(name string) error {
 	return cmd.Run()
 }
 
+// SwitchClient switches the tmux client to a different session.
+// Unlike Attach, this doesn't need to capture stdin/stdout since
+// it's meant to be called from background processes like the watch TUI.
+func SwitchClient(name string) error {
+	cmd := exec.Command("tmux", "switch-client", "-t", name)
+	return cmd.Run()
+}
+
 func Kill(name string) error {
 	cmd := exec.Command("tmux", "kill-session", "-t", name)
 	return cmd.Run()

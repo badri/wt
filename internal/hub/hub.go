@@ -177,8 +177,9 @@ func create(cfg *config.Config, opts *Options) error {
 			// Non-fatal - watch pane is optional
 			fmt.Fprintf(os.Stderr, "Warning: could not create watch pane: %v\n", err)
 		} else {
-			// Start wt watch in the new pane
-			watchCmd := exec.Command("tmux", "send-keys", "-t", HubSessionName+".1", "wt watch", "Enter")
+			// Start wt watch in a loop so it restarts if user quits
+			// This ensures the watch pane stays active
+			watchCmd := exec.Command("tmux", "send-keys", "-t", HubSessionName+".1", "while true; do wt watch; sleep 1; done", "Enter")
 			_ = watchCmd.Run() // Non-fatal if this fails
 
 			// Focus back on the main pane (pane 0)
