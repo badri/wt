@@ -95,7 +95,7 @@ func Run(cfg *config.Config, opts *Options) (*Result, error) {
 	clearTmuxHistory()
 
 	// 6. Respawn Claude via tmux
-	if err := respawnClaude(); err != nil {
+	if err := respawnClaude(cfg); err != nil {
 		return nil, fmt.Errorf("respawning Claude: %w", err)
 	}
 
@@ -245,7 +245,7 @@ func clearTmuxHistory() {
 }
 
 // respawnClaude respawns Claude in the current tmux pane
-func respawnClaude() error {
+func respawnClaude(cfg *config.Config) error {
 	// Check if we're in tmux
 	if os.Getenv("TMUX") == "" {
 		return fmt.Errorf("not in a tmux session - cannot respawn")
@@ -257,8 +257,14 @@ func respawnClaude() error {
 		cwd = os.Getenv("HOME")
 	}
 
-	// Build respawn command - start fresh Claude
-	respawnCmd := fmt.Sprintf("cd %s && exec claude", cwd)
+	// Use EditorCmd from config (defaults to "claude --dangerously-skip-permissions")
+	editorCmd := cfg.EditorCmd
+	if editorCmd == "" {
+		editorCmd = "claude"
+	}
+
+	// Build respawn command - start fresh Claude with same flags
+	respawnCmd := fmt.Sprintf("cd %s && exec %s", cwd, editorCmd)
 
 	// Use tmux respawn-pane to replace current process
 	cmd := exec.Command("tmux", "respawn-pane", "-k", respawnCmd)
