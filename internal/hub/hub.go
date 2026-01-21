@@ -145,6 +145,12 @@ func createOrAttach(cfg *config.Config, opts *Options) error {
 
 // create creates a new hub tmux session.
 func create(cfg *config.Config, opts *Options) error {
+	// Initialize hub-level beads store
+	if err := InitHubBeads(cfg); err != nil {
+		// Non-fatal - hub can work without beads
+		fmt.Fprintf(os.Stderr, "Warning: could not initialize hub beads: %v\n", err)
+	}
+
 	// Use home directory as working directory
 	homeDir := os.Getenv("HOME")
 	if homeDir == "" {

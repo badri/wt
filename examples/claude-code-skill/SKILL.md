@@ -970,6 +970,40 @@ This auto-primes new sessions with handoff context.
 - Marker file prevents "handoff loop" bug
 - `wt prime` clears marker after reading
 
+### Hub Beads Store
+
+The hub has its own beads store at `~/.config/wt/.beads/` with `hub-` prefix:
+
+```
+~/.config/wt/
+├── .beads/           # Hub-level beads (hub-* prefix)
+│   ├── beads.db      # SQLite database
+│   └── issues.jsonl  # JSONL export
+├── config.json       # wt configuration
+└── sessions.json     # Active sessions state
+```
+
+**Initialization**: Hub beads are auto-initialized when:
+- `wt hub` creates a new hub session
+- `wt handoff` or `wt prime` first runs
+
+**Manual initialization** (if needed):
+```bash
+cd ~/.config/wt && bd init --prefix hub
+```
+
+**The Hub Handoff bead**:
+- Title: "Hub Handoff"
+- Status: `pinned` (never closed)
+- Description: Contains the handoff context
+- Cleared after `wt prime` displays it
+
+View hub beads:
+```bash
+cd ~/.config/wt && bd list
+cd ~/.config/wt && bd show hub-xxx  # specific bead
+```
+
 ---
 
 ## Reference Files
