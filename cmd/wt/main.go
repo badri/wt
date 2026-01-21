@@ -132,6 +132,8 @@ func run() error {
 		return cmdHandoff(cfg, args[1:])
 	case "prime":
 		return cmdPrime(cfg, args[1:])
+	case "checkpoint":
+		return cmdCheckpoint(cfg, args[1:])
 	case "hub":
 		if hasHelpFlag(args[1:]) {
 			return cmdHubHelp()

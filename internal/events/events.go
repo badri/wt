@@ -22,6 +22,7 @@ const (
 	EventHubHandoff   EventType = "hub_handoff"
 	EventPRCreated    EventType = "pr_created"
 	EventPRMerged     EventType = "pr_merged"
+	EventCompaction   EventType = "compaction"
 )
 
 // Event represents a logged event
@@ -117,6 +118,17 @@ func (l *Logger) LogHubHandoff(claudeSession, message, workdir string) error {
 		ClaudeSession: claudeSession,
 		MergeMode:     message, // Reuse field for handoff message
 		WorktreePath:  workdir, // Working directory for session resumption
+	})
+}
+
+// LogCompaction logs a session compaction event (context recovery trigger)
+func (l *Logger) LogCompaction(sessionName, bead, project, workdir string) error {
+	return l.Log(&Event{
+		Type:         EventCompaction,
+		Session:      sessionName,
+		Bead:         bead,
+		Project:      project,
+		WorktreePath: workdir,
 	})
 }
 

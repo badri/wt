@@ -30,18 +30,20 @@ type PrimeOptions struct {
 
 // PrimeResult contains the outcome of a prime operation
 type PrimeResult struct {
-	IsPostHandoff  bool
-	PrevSession    string
-	HandoffTime    time.Time
-	HandoffContent string
-	BdPrimeOutput  string
+	IsPostHandoff     bool
+	PrevSession       string
+	HandoffTime       time.Time
+	HandoffContent    string
+	BdPrimeOutput     string
+	IsPostCompaction  bool        // Session resumed after compaction
+	CheckpointContent *Checkpoint // Recovered checkpoint data
 }
 
 // Prime injects context on session startup
 func Prime(cfg *config.Config, opts *PrimeOptions) (*PrimeResult, error) {
 	result := &PrimeResult{}
 
-	// 1. Check for handoff marker
+	// 1. Check for handoff marker (explicit handoff via wt handoff)
 	exists, prevSession, handoffTime, err := CheckMarker(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("checking marker: %w", err)
@@ -58,14 +60,27 @@ func Prime(cfg *config.Config, opts *PrimeOptions) (*PrimeResult, error) {
 		}
 	}
 
-	// 2. Get handoff content from file
+	// 2. Check for checkpoint (compaction recovery)
+	checkpoint, err := LoadCheckpoint()
+	if err != nil {
+		// Non-fatal
+		if !opts.Quiet {
+			fmt.Printf("Warning: could not load checkpoint: %v\n", err)
+		}
+	}
+	if checkpoint != nil {
+		result.IsPostCompaction = true
+		result.CheckpointContent = checkpoint
+	}
+
+	// 3. Get handoff content from file
 	content, err := GetHandoffContent(cfg)
 	if err != nil {
 		fmt.Printf("Warning: could not get handoff content: %v\n", err)
 	}
 	result.HandoffContent = content
 
-	// 3. Run bd prime if not disabled
+	// 4. Run bd prime if not disabled
 	if !opts.NoBdPrime {
 		bdOutput, err := runBdPrime()
 		if err != nil {
@@ -83,6 +98,17 @@ func Prime(cfg *config.Config, opts *PrimeOptions) (*PrimeResult, error) {
 
 // OutputPrimeResult outputs the prime result in a formatted way
 func OutputPrimeResult(result *PrimeResult) {
+	// Post-compaction recovery (highest priority)
+	if result.IsPostCompaction && result.CheckpointContent != nil {
+		fmt.Println()
+		fmt.Println("╔══════════════════════════════════════════════════════════════╗")
+		fmt.Println("║  🔄 CONTEXT RECOVERED - Resuming after compaction            ║")
+		fmt.Println("╚══════════════════════════════════════════════════════════════╝")
+		fmt.Println()
+		fmt.Println(FormatCheckpointForRecovery(result.CheckpointContent))
+		return // Don't show other content when recovering from compaction
+	}
+
 	// Post-handoff warning
 	if result.IsPostHandoff {
 		fmt.Println()
@@ -114,8 +140,8 @@ func OutputPrimeResult(result *PrimeResult) {
 		fmt.Println(result.BdPrimeOutput)
 	}
 
-	// Startup suggestions if not post-handoff
-	if !result.IsPostHandoff && result.HandoffContent == "" {
+	// Startup suggestions if not post-handoff and not post-compaction
+	if !result.IsPostHandoff && !result.IsPostCompaction && result.HandoffContent == "" {
 		fmt.Println("## 🚀 Session Started")
 		fmt.Println()
 		fmt.Println("Quick actions:")
