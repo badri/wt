@@ -94,15 +94,17 @@ func TestBuildInitialPrompt(t *testing.T) {
 		name            string
 		beadID          string
 		title           string
+		sessionName     string
 		proj            *project.Project
 		wantContains    []string
 		wantNotContains []string
 	}{
 		{
-			name:   "no project - defaults to pr-review",
-			beadID: "test-123",
-			title:  "Fix the bug",
-			proj:   nil,
+			name:        "no project - defaults to pr-review",
+			beadID:      "test-123",
+			title:       "Fix the bug",
+			sessionName: "wt-po",
+			proj:        nil,
 			wantContains: []string{
 				"Work on bead test-123: Fix the bug.",
 				"Workflow:",
@@ -111,15 +113,17 @@ func TestBuildInitialPrompt(t *testing.T) {
 				"Create a PR",
 				"wt signal ready",
 				"Do NOT run `wt done`",
+				"Session: wt-po", // Verify session name in commit message format
 			},
 			wantNotContains: []string{
 				"Run tests",
 			},
 		},
 		{
-			name:   "project with pr-review mode",
-			beadID: "test-456",
-			title:  "Add feature",
+			name:        "project with pr-review mode",
+			beadID:      "test-456",
+			title:       "Add feature",
+			sessionName: "wt-tigress",
 			proj: &project.Project{
 				MergeMode: "pr-review",
 			},
@@ -134,9 +138,10 @@ func TestBuildInitialPrompt(t *testing.T) {
 			},
 		},
 		{
-			name:   "project with direct mode",
-			beadID: "test-789",
-			title:  "Quick fix",
+			name:        "project with direct mode",
+			beadID:      "test-789",
+			title:       "Quick fix",
+			sessionName: "wt-crane",
 			proj: &project.Project{
 				MergeMode: "direct",
 			},
@@ -151,9 +156,10 @@ func TestBuildInitialPrompt(t *testing.T) {
 			},
 		},
 		{
-			name:   "project with pr-auto mode",
-			beadID: "test-abc",
-			title:  "Auto merge feature",
+			name:        "project with pr-auto mode",
+			beadID:      "test-abc",
+			title:       "Auto merge feature",
+			sessionName: "wt-viper",
 			proj: &project.Project{
 				MergeMode: "pr-auto",
 			},
@@ -165,9 +171,10 @@ func TestBuildInitialPrompt(t *testing.T) {
 			},
 		},
 		{
-			name:   "project with test env",
-			beadID: "test-def",
-			title:  "Tested feature",
+			name:        "project with test env",
+			beadID:      "test-def",
+			title:       "Tested feature",
+			sessionName: "wt-mantis",
 			proj: &project.Project{
 				MergeMode: "pr-review",
 				TestEnv: &project.TestEnv{
@@ -182,7 +189,7 @@ func TestBuildInitialPrompt(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := buildInitialPrompt(tt.beadID, tt.title, tt.proj)
+			result := buildInitialPrompt(tt.beadID, tt.title, tt.sessionName, tt.proj)
 
 			for _, want := range tt.wantContains {
 				if !contains(result, want) {

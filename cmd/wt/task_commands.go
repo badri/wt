@@ -311,7 +311,7 @@ func cmdTask(cfg *config.Config, args []string) error {
 
 	// Send initial task prompt
 	fmt.Println("Sending initial prompt to worker...")
-	prompt := buildTaskPrompt(description, condition, proj)
+	prompt := buildTaskPrompt(description, condition, sessionName, proj)
 	if err := tmux.NudgeSession(sessionName, prompt); err != nil {
 		fmt.Printf("Warning: could not send initial prompt: %v\n", err)
 	}
@@ -556,7 +556,7 @@ func runTestsAndCheck(cwd string) error {
 }
 
 // buildTaskPrompt creates the prompt to send to Claude for a task session
-func buildTaskPrompt(description string, condition session.CompletionCondition, _ *project.Project) string {
+func buildTaskPrompt(description string, condition session.CompletionCondition, sessionName string, _ *project.Project) string {
 	var sb strings.Builder
 
 	sb.WriteString(fmt.Sprintf("Task: %s\n\n", description))
@@ -595,6 +595,15 @@ func buildTaskPrompt(description string, condition session.CompletionCondition, 
 		sb.WriteString("  wt signal ready \"Ready for review\"\n")
 		sb.WriteString("\nThe hub will ask for user confirmation before cleanup.")
 	}
+
+	// Add commit message format with session name
+	sb.WriteString("\n\n## Commit Message Format\n")
+	sb.WriteString("Include this footer in your commit messages for traceability:\n\n")
+	sb.WriteString("```\n")
+	sb.WriteString("<commit message>\n\n")
+	sb.WriteString("Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\n")
+	sb.WriteString(fmt.Sprintf("Session: %s\n", sessionName))
+	sb.WriteString("```\n")
 
 	return sb.String()
 }

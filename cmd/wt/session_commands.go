@@ -415,7 +415,7 @@ func cmdNew(cfg *config.Config, args []string) error {
 
 	// Send initial work prompt using reliable nudge pattern
 	fmt.Println("Sending initial prompt to worker...")
-	prompt := buildInitialPrompt(beadID, beadInfo.Title, proj)
+	prompt := buildInitialPrompt(beadID, beadInfo.Title, sessionName, proj)
 	if err := tmux.NudgeSession(sessionName, prompt); err != nil {
 		fmt.Printf("Warning: could not send initial prompt: %v\n", err)
 	}
@@ -1155,7 +1155,7 @@ func getClaudeSessionID(worktreePath string) string {
 }
 
 // buildInitialPrompt creates the prompt to send to Claude when starting work on a bead
-func buildInitialPrompt(beadID, title string, proj *project.Project) string {
+func buildInitialPrompt(beadID, title, sessionName string, proj *project.Project) string {
 	var sb strings.Builder
 
 	// Main task
@@ -1197,8 +1197,17 @@ func buildInitialPrompt(beadID, title string, proj *project.Project) string {
 		sb.WriteString("\nDo NOT run `wt done` - the hub will handle cleanup after review.")
 	}
 
+	// Add commit message format with session name
+	sb.WriteString("\n\n## Commit Message Format\n")
+	sb.WriteString("Include this footer in your commit messages for traceability:\n\n")
+	sb.WriteString("```\n")
+	sb.WriteString("<commit message>\n\n")
+	sb.WriteString("Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\n")
+	sb.WriteString(fmt.Sprintf("Session: %s\n", sessionName))
+	sb.WriteString("```\n")
+
 	// Add conflict resolution guidance
-	sb.WriteString("\n\n## Conflict Resolution (if needed)\n")
+	sb.WriteString("\n## Conflict Resolution (if needed)\n")
 	sb.WriteString("If `wt done` reports merge conflicts:\n")
 	sb.WriteString("- Auto-resolve: trivial conflicts (whitespace, imports, non-overlapping changes)\n")
 	sb.WriteString("- Escalate via `wt signal blocked \"<reason>\"`: semantic conflicts, deletion conflicts, business logic\n")
