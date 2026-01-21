@@ -574,6 +574,11 @@ func parseHandoffFlags(args []string) *handoff.Options {
 func cmdPrime(cfg *config.Config, args []string) error {
 	opts := parsePrimeFlags(args)
 
+	// Hook mode: read session_id from stdin and persist to .wt/session_id
+	if opts.HookMode {
+		return handoff.PrimeHook()
+	}
+
 	result, err := handoff.Prime(cfg, opts)
 	if err != nil {
 		return err
@@ -599,6 +604,8 @@ func parsePrimeFlags(args []string) *handoff.PrimeOptions {
 			opts.Quiet = true
 		case "--no-bd-prime":
 			opts.NoBdPrime = true
+		case "--hook":
+			opts.HookMode = true
 		}
 	}
 	return opts

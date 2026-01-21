@@ -537,7 +537,8 @@ HANDOFF COMMANDS:
     wt handoff              Hand off to fresh Claude instance
                             Options: -m <message>, -c/--collect, --dry-run
     wt prime                Inject context on session startup
-                            Options: -q/--quiet, --no-bd-prime
+                            Options: -q/--quiet, --no-bd-prime, --hook
+                            --hook: Read session_id from Claude SessionStart hook JSON on stdin
 
 CONFIGURATION:
     wt config               Show current configuration

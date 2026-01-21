@@ -11,6 +11,7 @@ import (
 	"github.com/badri/wt/internal/bead"
 	"github.com/badri/wt/internal/config"
 	"github.com/badri/wt/internal/events"
+	"github.com/badri/wt/internal/handoff"
 	"github.com/badri/wt/internal/merge"
 	"github.com/badri/wt/internal/namepool"
 	"github.com/badri/wt/internal/project"
@@ -1107,8 +1108,16 @@ func cmdSwitch(cfg *config.Config, nameOrBead string) error {
 
 // getClaudeSessionID gets the Claude session ID for seance resumption
 func getClaudeSessionID(worktreePath string) string {
+	// First, try reading from .wt/session_id in the worktree
+	// This is persisted by wt prime --hook from Claude's SessionStart hook
+	if worktreePath != "" {
+		if id := handoff.ReadSessionID(worktreePath); id != "" {
+			return id
+		}
+	}
+
 	// Claude Code sets CLAUDE_SESSION_ID when running
-	// This is the most reliable way to get the session ID
+	// This only works when called from within Claude's process
 	if id := os.Getenv("CLAUDE_SESSION_ID"); id != "" {
 		return id
 	}
