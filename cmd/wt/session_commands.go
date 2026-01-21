@@ -220,13 +220,7 @@ func cmdNew(cfg *config.Config, args []string) error {
 		}
 	}
 
-	// Validate bead exists
-	beadInfo, err := bead.Show(beadID)
-	if err != nil {
-		return fmt.Errorf("bead not found: %s", beadID)
-	}
-
-	// Determine source repo
+	// Determine source repo FIRST (needed to find the bead)
 	repoPath := flags.repo
 	var proj *project.Project
 	mgr := project.NewManager(cfg)
@@ -243,6 +237,13 @@ func cmdNew(cfg *config.Config, args []string) error {
 				return fmt.Errorf("not in a git repository and no project registered for bead prefix. Use --repo <path> or register a project")
 			}
 		}
+	}
+
+	// Validate bead exists (using project's beads directory if known)
+	beadsDir := repoPath + "/.beads"
+	beadInfo, err := bead.ShowInDir(beadID, beadsDir)
+	if err != nil {
+		return fmt.Errorf("bead not found: %s", beadID)
 	}
 
 	// Allocate name from themed pool
@@ -290,8 +291,7 @@ func cmdNew(cfg *config.Config, args []string) error {
 		return fmt.Errorf("creating worktree: %w", err)
 	}
 
-	// Determine BEADS_DIR (main repo's .beads)
-	beadsDir := repoPath + "/.beads"
+	// beadsDir already set above when validating the bead
 
 	// Allocate port offset if test env is configured
 	var portOffset int
