@@ -280,8 +280,8 @@ func cmdNew(cfg *config.Config, args []string) error {
 		}
 	}
 
-	// Create worktree
-	worktreePath := cfg.WorktreePath(sessionName)
+	// Create worktree using bead ID to guarantee unique paths
+	worktreePath := cfg.WorktreePath(beadID)
 	fmt.Printf("Creating git worktree at %s...\n", worktreePath)
 	if err := worktree.Create(repoPath, worktreePath, beadID); err != nil {
 		return fmt.Errorf("creating worktree: %w", err)
@@ -494,9 +494,12 @@ func cmdClose(cfg *config.Config, name string) error {
 	fmt.Printf("Closing session '%s'...\n", name)
 	fmt.Printf("  Bead: %s\n", sess.Bead)
 
-	// Run teardown hooks if configured
+	// Get project config for teardown hooks and default branch
 	mgr := project.NewManager(cfg)
-	if proj, _ := mgr.Get(sess.Project); proj != nil {
+	proj, _ := mgr.Get(sess.Project)
+
+	// Run teardown hooks if configured
+	if proj != nil {
 		// Run test env teardown
 		if proj.TestEnv != nil && proj.TestEnv.Teardown != "" {
 			fmt.Println("  Running test environment teardown...")
@@ -518,10 +521,26 @@ func cmdClose(cfg *config.Config, name string) error {
 		}
 	}
 
-	// Close the bead
-	fmt.Println("\n  Closing bead...")
-	if err := bead.Close(sess.Bead); err != nil {
-		fmt.Printf("  Warning: could not close bead: %v\n", err)
+	// Only close the bead if the branch has been merged to main
+	// This ensures beads stay open when there's unfinished work
+	defaultBranch := "main"
+	if proj != nil && proj.DefaultBranch != "" {
+		defaultBranch = proj.DefaultBranch
+	}
+
+	branch := sess.Branch
+	if branch == "" {
+		branch = sess.Bead
+	}
+
+	if worktree.IsBranchMerged(sess.Worktree, branch, defaultBranch) {
+		fmt.Println("\n  Branch merged to", defaultBranch, "- closing bead...")
+		if err := bead.Close(sess.Bead); err != nil {
+			fmt.Printf("  Warning: could not close bead: %v\n", err)
+		}
+	} else {
+		fmt.Printf("\n  Branch not merged to %s - keeping bead %s open.\n", defaultBranch, sess.Bead)
+		fmt.Println("  Use 'wt done' to merge and close, or 'bd close' to close manually.")
 	}
 
 	// Kill tmux session

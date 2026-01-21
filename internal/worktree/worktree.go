@@ -77,3 +77,12 @@ func checkBranchExists(repoPath, branch string) bool {
 	cmd = exec.Command("git", "-C", repoPath, "show-ref", "--verify", "--quiet", "refs/remotes/origin/"+branch)
 	return cmd.Run() == nil
 }
+
+// IsBranchMerged checks if a branch has been merged into the target branch (e.g., main).
+// This is used to determine whether a bead should be closed when a session closes.
+func IsBranchMerged(repoPath, branch, targetBranch string) bool {
+	// Use merge-base --is-ancestor to check if branch is an ancestor of target
+	// This returns exit code 0 if branch is merged into target
+	cmd := exec.Command("git", "-C", repoPath, "merge-base", "--is-ancestor", branch, targetBranch)
+	return cmd.Run() == nil
+}
