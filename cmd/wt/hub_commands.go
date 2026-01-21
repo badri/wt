@@ -586,6 +586,13 @@ func cmdPrime(cfg *config.Config, args []string) error {
 
 	handoff.OutputPrimeResult(result)
 
+	// Clear checkpoint after displaying (context was recovered)
+	if result.IsPostCompaction {
+		if err := handoff.ClearCheckpoint(); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not clear checkpoint: %v\n", err)
+		}
+	}
+
 	// Archive handoff file after displaying (renames handoff.md to handoff-<timestamp>.md)
 	if result.HandoffContent != "" {
 		if err := handoff.ClearHandoffContent(cfg); err != nil {
@@ -606,6 +613,71 @@ func parsePrimeFlags(args []string) *handoff.PrimeOptions {
 			opts.NoBdPrime = true
 		case "--hook":
 			opts.HookMode = true
+		}
+	}
+	return opts
+}
+
+// cmdCheckpoint saves a checkpoint for context recovery
+func cmdCheckpoint(cfg *config.Config, args []string) error {
+	opts := parseCheckpointFlags(args)
+
+	if opts.Clear {
+		if err := handoff.ClearCheckpoint(); err != nil {
+			return fmt.Errorf("clearing checkpoint: %w", err)
+		}
+		if !opts.Quiet {
+			fmt.Println("Checkpoint cleared.")
+		}
+		return nil
+	}
+
+	cp, err := handoff.SaveCheckpoint(cfg, opts)
+	if err != nil {
+		return err
+	}
+
+	if !opts.Quiet {
+		fmt.Println("╔════════════════════════════════════════════════════════════╗")
+		fmt.Println("║  💾 Checkpoint Saved                                       ║")
+		fmt.Println("╚════════════════════════════════════════════════════════════╝")
+		fmt.Println()
+		fmt.Printf("Session: %s\n", cp.Session)
+		if cp.Bead != "" {
+			fmt.Printf("Bead: %s (%s)\n", cp.Bead, cp.BeadTitle)
+		}
+		fmt.Printf("Branch: %s\n", cp.GitBranch)
+		fmt.Printf("Saved at: %s\n", cp.CreatedAt)
+		if cp.Notes != "" {
+			fmt.Printf("Notes: %s\n", cp.Notes)
+		}
+		fmt.Println()
+		fmt.Println("Recovery will auto-inject this context on session startup.")
+	}
+
+	return nil
+}
+
+func parseCheckpointFlags(args []string) *handoff.CheckpointOptions {
+	opts := &handoff.CheckpointOptions{
+		Trigger: "manual",
+	}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "-q", "--quiet":
+			opts.Quiet = true
+		case "-n", "--notes":
+			if i+1 < len(args) {
+				opts.Notes = args[i+1]
+				i++
+			}
+		case "-m", "--message":
+			if i+1 < len(args) {
+				opts.Notes = args[i+1]
+				i++
+			}
+		case "--clear":
+			opts.Clear = true
 		}
 	}
 	return opts
