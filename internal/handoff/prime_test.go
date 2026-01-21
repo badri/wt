@@ -1,6 +1,7 @@
 package handoff
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -258,4 +259,63 @@ func TestOutputPrimeResultPostHandoff(t *testing.T) {
 
 	// This should not panic - just calling to verify it runs
 	OutputPrimeResult(result)
+}
+
+func TestReadSessionID(t *testing.T) {
+	// Create a temp directory
+	tmpDir, err := os.MkdirTemp("", "wt-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Test reading from non-existent directory
+	id := ReadSessionID(tmpDir)
+	if id != "" {
+		t.Errorf("expected empty session ID for non-existent file, got '%s'", id)
+	}
+
+	// Create .wt directory and session_id file
+	runtimeDir := filepath.Join(tmpDir, RuntimeDir)
+	if err := os.MkdirAll(runtimeDir, 0755); err != nil {
+		t.Fatalf("failed to create runtime dir: %v", err)
+	}
+
+	expectedID := "test-session-id-12345"
+	sessionIDPath := filepath.Join(runtimeDir, SessionIDFile)
+	if err := os.WriteFile(sessionIDPath, []byte(expectedID+"\n"), 0644); err != nil {
+		t.Fatalf("failed to write session_id: %v", err)
+	}
+
+	// Test reading session ID
+	id = ReadSessionID(tmpDir)
+	if id != expectedID {
+		t.Errorf("expected session ID '%s', got '%s'", expectedID, id)
+	}
+}
+
+func TestPrimeOptionsHookMode(t *testing.T) {
+	opts := &PrimeOptions{
+		HookMode: true,
+	}
+
+	if !opts.HookMode {
+		t.Error("HookMode should be true")
+	}
+}
+
+func TestClaudeHookDataParsing(t *testing.T) {
+	// Test parsing JSON
+	jsonData := `{"session_id": "abc-123", "cwd": "/path/to/project"}`
+	var hookData ClaudeHookData
+	if err := json.Unmarshal([]byte(jsonData), &hookData); err != nil {
+		t.Fatalf("failed to parse JSON: %v", err)
+	}
+
+	if hookData.SessionID != "abc-123" {
+		t.Errorf("expected session_id 'abc-123', got '%s'", hookData.SessionID)
+	}
+	if hookData.Cwd != "/path/to/project" {
+		t.Errorf("expected cwd '/path/to/project', got '%s'", hookData.Cwd)
+	}
 }

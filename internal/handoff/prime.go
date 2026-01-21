@@ -2,8 +2,12 @@ package handoff
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
+	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -12,10 +16,16 @@ import (
 	"github.com/badri/wt/internal/session"
 )
 
+const (
+	// SessionIDFile is the name of the file that stores the Claude session ID
+	SessionIDFile = "session_id"
+)
+
 // PrimeOptions configures prime behavior
 type PrimeOptions struct {
 	Quiet     bool // Suppress non-essential output
 	NoBdPrime bool // Skip running bd prime
+	HookMode  bool // Read session_id from Claude's SessionStart hook JSON on stdin
 }
 
 // PrimeResult contains the outcome of a prime operation
@@ -216,4 +226,61 @@ func QuickPrime(cfg *config.Config) error {
 	}
 
 	return nil
+}
+
+// ClaudeHookData represents the JSON structure from Claude's SessionStart hook
+type ClaudeHookData struct {
+	SessionID string `json:"session_id"`
+	Cwd       string `json:"cwd"`
+}
+
+// PrimeHook handles the --hook mode for wt prime.
+// It reads Claude's SessionStart hook JSON from stdin, extracts the session_id,
+// and persists it to .wt/session_id in the current directory.
+func PrimeHook() error {
+	// Read JSON from stdin
+	data, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		return fmt.Errorf("reading stdin: %w", err)
+	}
+
+	// Parse JSON
+	var hookData ClaudeHookData
+	if err := json.Unmarshal(data, &hookData); err != nil {
+		return fmt.Errorf("parsing hook JSON: %w", err)
+	}
+
+	// Validate session_id
+	if hookData.SessionID == "" {
+		return fmt.Errorf("no session_id in hook data")
+	}
+
+	// Persist session_id to .wt/session_id in current directory
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("getting cwd: %w", err)
+	}
+
+	runtimeDir := filepath.Join(cwd, RuntimeDir)
+	if err := os.MkdirAll(runtimeDir, 0755); err != nil {
+		return fmt.Errorf("creating runtime dir: %w", err)
+	}
+
+	sessionIDPath := filepath.Join(runtimeDir, SessionIDFile)
+	if err := os.WriteFile(sessionIDPath, []byte(hookData.SessionID), 0644); err != nil {
+		return fmt.Errorf("writing session_id: %w", err)
+	}
+
+	return nil
+}
+
+// ReadSessionID reads the Claude session ID from .wt/session_id in the given directory.
+// Returns empty string if the file doesn't exist.
+func ReadSessionID(dir string) string {
+	sessionIDPath := filepath.Join(dir, RuntimeDir, SessionIDFile)
+	data, err := os.ReadFile(sessionIDPath)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
 }
