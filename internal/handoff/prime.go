@@ -13,6 +13,7 @@ import (
 
 	"github.com/badri/wt/internal/bead"
 	"github.com/badri/wt/internal/config"
+	"github.com/badri/wt/internal/hub"
 	"github.com/badri/wt/internal/session"
 )
 
@@ -73,8 +74,19 @@ func Prime(cfg *config.Config, opts *PrimeOptions) (*PrimeResult, error) {
 		result.CheckpointContent = checkpoint
 	}
 
-	// 3. Get handoff content from file
-	content, err := GetHandoffContent(cfg)
+	// 3. Get handoff content - from hub bead or legacy file
+	inHub := os.Getenv("WT_HUB") == "1"
+	var content string
+	if inHub {
+		// Try hub handoff bead first
+		content, err = hub.ReadHandoffBead(cfg)
+		if err != nil {
+			// Fall back to file
+			content, err = GetHandoffContent(cfg)
+		}
+	} else {
+		content, err = GetHandoffContent(cfg)
+	}
 	if err != nil {
 		fmt.Printf("Warning: could not get handoff content: %v\n", err)
 	}
@@ -133,6 +145,7 @@ func OutputPrimeResult(result *PrimeResult) {
 		fmt.Println("## 🤝 Handoff from Previous Session")
 		fmt.Println()
 		fmt.Println(result.HandoffContent)
+		// Note: Content is cleared by the caller after display if needed
 	}
 
 	// bd prime output
@@ -242,13 +255,23 @@ func QuickPrime(cfg *config.Config) error {
 		ClearMarker(cfg)
 	}
 
-	// Get handoff content
-	content, _ := GetHandoffContent(cfg)
+	// Get handoff content - from hub bead or legacy file
+	inHub := os.Getenv("WT_HUB") == "1"
+	var content string
+	if inHub {
+		content, _ = hub.ReadHandoffBead(cfg)
+	} else {
+		content, _ = GetHandoffContent(cfg)
+	}
 	if content != "" {
 		fmt.Println("## Handoff Notes")
 		fmt.Println(content)
-		// Archive after displaying
-		ClearHandoffContent(cfg)
+		// Clear after displaying
+		if inHub {
+			hub.ClearHandoffBead(cfg)
+		} else {
+			ClearHandoffContent(cfg)
+		}
 	}
 
 	return nil

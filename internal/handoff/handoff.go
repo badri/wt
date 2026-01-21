@@ -14,6 +14,7 @@ import (
 	"github.com/badri/wt/internal/bead"
 	"github.com/badri/wt/internal/config"
 	"github.com/badri/wt/internal/events"
+	"github.com/badri/wt/internal/hub"
 	"github.com/badri/wt/internal/session"
 )
 
@@ -56,8 +57,8 @@ func Run(cfg *config.Config, opts *Options) (*Result, error) {
 	}
 	result.Message = context
 
-	// Determine handoff file path based on session type
-	handoffPath := getHandoffFilePath(cfg)
+	// Check if we're in hub mode - use hub beads
+	inHub := os.Getenv("WT_HUB") == "1"
 
 	// Dry run - just show what would happen
 	if opts.DryRun {
@@ -67,18 +68,37 @@ func Run(cfg *config.Config, opts *Options) (*Result, error) {
 		fmt.Println()
 		fmt.Println(context)
 		fmt.Println("Would:")
-		fmt.Println("  1. Write handoff context to", handoffPath)
+		if inHub {
+			fmt.Println("  1. Update hub handoff bead with context")
+		} else {
+			handoffPath := getHandoffFilePath(cfg)
+			fmt.Println("  1. Write handoff context to", handoffPath)
+		}
 		fmt.Println("  2. Write handoff marker to", filepath.Join(cfg.ConfigDir(), RuntimeDir, HandoffMarkerFile))
 		fmt.Println("  3. Clear tmux history")
 		fmt.Println("  4. Respawn Claude via tmux respawn-pane")
 		return result, nil
 	}
 
-	// 2. Write handoff context to file
-	if err := writeHandoffFile(handoffPath, context); err != nil {
-		return nil, fmt.Errorf("writing handoff file: %w", err)
+	// 2. Write handoff context - either to hub bead or legacy file
+	if inHub {
+		// Use hub-level beads for hub sessions
+		if err := hub.UpdateHandoffBead(cfg, context); err != nil {
+			// Fall back to file if beads fail
+			fmt.Fprintf(os.Stderr, "Warning: could not update hub handoff bead: %v (falling back to file)\n", err)
+			handoffPath := getHandoffFilePath(cfg)
+			if err := writeHandoffFile(handoffPath, context); err != nil {
+				return nil, fmt.Errorf("writing handoff file: %w", err)
+			}
+		}
+	} else {
+		// Legacy file-based handoff for non-hub sessions
+		handoffPath := getHandoffFilePath(cfg)
+		if err := writeHandoffFile(handoffPath, context); err != nil {
+			return nil, fmt.Errorf("writing handoff file: %w", err)
+		}
 	}
-	result.BeadUpdated = true // Reusing field to indicate file written
+	result.BeadUpdated = true
 
 	// 3. Write handoff marker
 	if err := writeMarker(cfg); err != nil {
