@@ -220,14 +220,15 @@ func cmdNew(cfg *config.Config, args []string) error {
 		}
 	}
 
-	// Determine source repo FIRST (needed to find the bead)
+	// Determine source repo and project config
 	repoPath := flags.repo
 	var proj *project.Project
 	mgr := project.NewManager(cfg)
 
+	// Always try to find project by bead prefix (needed for merge mode, test env, etc.)
+	proj, _ = mgr.FindByBeadPrefix(beadID)
+
 	if repoPath == "" {
-		// Try to find project by bead prefix
-		proj, _ = mgr.FindByBeadPrefix(beadID)
 		if proj != nil {
 			repoPath = proj.RepoPath()
 		} else {
