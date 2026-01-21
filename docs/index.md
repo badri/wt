@@ -72,13 +72,30 @@ Ready to dive in?
 - [Quick Start](getting-started/quickstart.md) - Your first wt session in 5 minutes
 - [Shell Integration](getting-started/shell-integration.md) - Completions and keybindings
 
+## Guides
+
+Practical guides for using wt effectively:
+
+- [Hub Workflow](guides/hub-workflow.md) - The hub/worker pattern and conversational orchestration
+- [Sample Workflows](guides/sample-workflows.md) - Real-world scenarios: PR review, YOLO mode, parallel workers, and more
+- [Auto Mode](guides/auto-mode.md) - Hands-off batch processing
+- [Seance](guides/seance.md) - Querying past sessions
+
 ## Core Concepts
 
+- [Overview](concepts/overview.md) - How wt works
 - [Sessions](concepts/sessions.md) - How wt manages agent sessions
 - [Worktrees](concepts/worktrees.md) - Git worktree isolation
 - [Beads Integration](concepts/beads.md) - Task tracking with beads
 - [Test Environments](concepts/test-environments.md) - Per-session test isolation
 - [Merge Modes](concepts/merge-modes.md) - PR workflows
+
+## Reference
+
+- [Technical Specification](reference/spec.md) - Architecture, configuration, and internals
+- [Configuration](reference/configuration.md) - All configuration options
+- [Environment](reference/environment.md) - Environment variables
+- [Troubleshooting](reference/troubleshooting.md) - Common issues and solutions
 
 ## Related Projects
 

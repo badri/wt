@@ -1,18 +1,34 @@
 # Hub Workflow
 
-The **hub/worker pattern** is the recommended way to use wt for orchestrating multiple AI coding sessions.
+The **hub** is where you orchestrate your AI coding work. It's a conversation with Claude where you describe what needs to be done, and Claude manages the workers.
 
-## Overview
+## The Key Insight
+
+**You don't manually run wt commands.** Instead, you have a conversation with Claude in your hub, and Claude handles the commands for you:
+
+```
+You: "I need to fix that login bug. Can you spawn a worker for it?"
+
+Claude: I'll create a bead and spawn a worker.
+> bd create --title="Fix login bug" --type=bug
+> wt new myproject-abc
+
+Session 'toast' is ready and working on it.
+```
+
+This is the natural way to use wt—through conversation, not memorizing commands.
+
+## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                          Hub                                 │
 │  ┌───────────────────────────────────────────────────────┐  │
-│  │  You (or Claude) orchestrating:                       │  │
-│  │  - Groom beads                                        │  │
-│  │  - Spawn workers                                      │  │
+│  │  You + Claude orchestrating:                          │  │
+│  │  - Plan what to work on                               │  │
+│  │  - Spawn workers for tasks                            │  │
 │  │  - Monitor progress                                   │  │
-│  │  - Review PRs                                         │  │
+│  │  - Review completed work                              │  │
 │  │  - Handle blockers                                    │  │
 │  └───────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
@@ -24,17 +40,17 @@ The **hub/worker pattern** is the recommended way to use wt for orchestrating mu
     └─────────┘   └─────────┘   └─────────┘
 ```
 
-## The Hub
+## What the Hub Does
 
-The hub is your command center. From here you:
+The hub is your command center where you:
 
-1. **See available work** - `wt ready` shows beads with no blockers
-2. **Spawn workers** - `wt new <bead>` creates isolated sessions
-3. **Monitor progress** - `wt watch` shows live status
+1. **Plan your work** - Review ready beads, prioritize, create new work
+2. **Spawn workers** - Ask Claude to create sessions for tasks
+3. **Monitor progress** - Check on workers, see the live dashboard
 4. **Handle issues** - Jump to blocked workers, provide guidance
-5. **Review completions** - Check PRs, merge work
+5. **Review completions** - Check PRs, decide on merge strategies
 
-### Setting Up a Hub
+### Starting Your Hub
 
 Create a dedicated hub session:
 
@@ -42,100 +58,117 @@ Create a dedicated hub session:
 wt hub
 ```
 
-Or work from any terminal - the hub is conceptual, not required.
+Or simply start Claude in any terminal—the hub is conceptual, not a strict requirement. The `wt hub` command just gives you a dedicated tmux session for orchestration.
 
-### Hub with Watch
+### Hub with Dashboard
 
-Start hub with live dashboard:
+Start hub with live monitoring:
 
 ```bash
 wt hub --watch
 ```
 
-This creates a split pane showing all worker statuses.
+This creates a split pane showing all worker statuses in real-time.
 
-## Workflow Example
+## A Typical Day (Conversation Style)
 
-### 1. Start Your Day
+Here's how a day looks when working through your hub:
 
-```bash
-# Check what's ready to work on
-wt ready
-# myproject-abc  Add user authentication
-# myproject-def  Fix login validation
-# myproject-ghi  Update error messages
+### Morning: Check What's Ready
 
-# See overall project status
-bd stats
+```
+You: "What work is available today?"
+
+Claude: Let me check.
+> wt ready
+
+Three beads ready:
+- myproject-abc: Add user authentication
+- myproject-def: Fix login validation
+- myproject-ghi: Update error messages
+
+> bd stats
+
+Project status: 3 open, 2 in progress, 12 closed this week.
 ```
 
-### 2. Spawn Workers
+### Start Some Workers
 
-```bash
-# Spawn sessions for ready beads
-wt new myproject-abc
-# → Spawned session 'toast' for bead myproject-abc
+```
+You: "Let's work on the auth and validation fixes in parallel."
 
-wt new myproject-def
-# → Spawned session 'shadow' for bead myproject-def
+Claude: Spawning workers for both.
+> wt new myproject-abc  # → toast
+> wt new myproject-def  # → shadow
+
+Two workers running:
+- toast: Working on authentication
+- shadow: Working on login validation
 ```
 
-### 3. Monitor Progress
+### Check Progress
 
-```bash
-# See all sessions
-wt
+```
+You: "How are they doing?"
 
-# Or watch live
-wt watch
+Claude:
+> wt
+
+┌─ Active Sessions ─────────────────────────────────────────────┐
+│ 🟢 toast    myproject-abc   Working   Add user authentication │
+│ 🟢 shadow   myproject-def   Working   Fix login validation    │
+└───────────────────────────────────────────────────────────────┘
+
+Both are actively working. Toast has made 3 commits, shadow is still
+on its first approach.
 ```
 
-Dashboard shows:
+### Handle a Blocker
 
-- Session name and bead
-- Status (working/idle/blocked/error)
-- Last activity
-- Bead title
+```
+You: "Shadow signaled blocked. What's wrong?"
 
-### 4. Handle Blockers
+Claude: Let me check.
+> wt shadow
+> wt status
 
-If a worker signals blocked:
+Shadow is blocked: "Need database migration for new validation field"
 
-```bash
-# Jump to the blocked session
-wt shadow
+You: "Tell it to create the migration itself—it has full permissions."
 
-# Inside: see what's wrong
-wt status
-# Status: blocked
-# Message: Need API credentials for external service
+Claude:
+> wt signal working "You can create the migration."
 
-# Fix the issue, then signal ready
-wt signal working "Got credentials, continuing"
+Shadow is unblocked and continuing.
 ```
 
-### 5. Review Completions
+### Review Completed Work
 
-When workers signal ready:
+```
+You: "Toast says it's done. Show me what it did."
 
-```bash
-# Check the PR
-gh pr view <pr-number>
+Claude:
+> gh pr view 45
 
-# Or use seance to ask questions
-wt seance toast -p "What approach did you take for auth?"
+PR #45: Add user authentication
+- 8 files changed, +342 -12
+- Tests passing
+
+Want me to summarize the approach?
 ```
 
-### 6. Clean Up
+### End of Day Cleanup
 
-```bash
-# After PR is merged
-wt close toast
-wt close shadow
-
-# Or close all completed sessions
-wt close toast shadow obsidian
 ```
+You: "PR #45 was merged. Clean up toast."
+
+Claude:
+> wt close toast
+
+Toast closed. Shadow is still working.
+```
+
+For more detailed scenarios, see [Sample Workflows](sample-workflows.md).
 
 ## Hub Session Commands
 
@@ -168,63 +201,124 @@ This:
 
 ## Best Practices
 
-### 1. Keep Workers Focused
+### Keep Workers Focused
 
-Each worker handles one bead. Don't give workers additional tasks - create new beads instead.
+Each worker handles one bead. If you find yourself wanting to give a worker additional work, create a new bead instead:
 
-### 2. Use Watch Dashboard
+```
+You: "Toast is almost done with auth. Can it also fix the session timeout?"
 
-The `wt watch` dashboard helps you notice:
+Claude: I'd recommend creating a separate bead for the timeout fix. That way
+we keep clear boundaries and can track it independently.
+> bd create --title="Fix session timeout" --type=bug
 
-- Workers that went idle (might need help)
-- Workers that errored (need intervention)
-- Workers that completed (ready for review)
+Want me to spawn another worker for it?
+```
 
-### 3. Handle Blockers Quickly
+### Monitor Regularly
 
-Blocked workers are wasted workers. When you see a blocker:
+Ask Claude to check on things:
 
-1. Jump to the session
-2. Understand the issue
-3. Either fix it or create a dependency bead
-4. Signal the worker to continue
+```
+You: "Check on all the workers."
 
-### 4. Review Before Closing
+Claude:
+> wt watch
 
-Before `wt close`:
+- toast: Working steadily, 4 commits in the last hour
+- shadow: Idle for 10 minutes—might be stuck
+- obsidian: Just signaled ready, PR #46 created
+```
 
-- Check the PR looks good
-- Verify tests passed
-- Ensure the bead is truly complete
+### Handle Blockers Quickly
 
-### 5. Clean Up Regularly
+Blocked workers are wasted workers:
 
-Don't let finished sessions accumulate:
+```
+You: "Any workers blocked?"
 
-```bash
-# Check for sessions marked ready
-wt | grep "Ready"
+Claude:
+> wt | grep -i blocked
 
-# Close completed ones
-wt close toast shadow
+Shadow is blocked: "Need staging credentials"
+
+You: "The credentials are in the team vault under 'Staging DB'."
+
+Claude: I'll pass that along.
+> wt signal working "Credentials in team vault under 'Staging DB'"
+```
+
+### Review Before Closing
+
+Have Claude help you review:
+
+```
+You: "Toast is done. Before I close it, show me the changes and run tests."
+
+Claude:
+> gh pr view 45 --comments
+> cd ~/worktrees/toast && npm test
+
+PR looks good: 8 files, all tests passing. Ready to close?
+```
+
+### Clean Up Regularly
+
+```
+You: "Any sessions I should clean up?"
+
+Claude:
+> wt
+
+You have 3 sessions where PRs were merged:
+- toast (PR #45)
+- shadow (PR #46)
+- obsidian (PR #47)
+
+Should I close all of them?
+
+You: "Yes, clean them up."
+
+Claude:
+> wt close toast shadow obsidian
+
+All sessions closed.
 ```
 
 ## Parallel Processing
 
-Spawn multiple workers for independent beads:
+Ask Claude to maximize throughput:
 
-```bash
-# Check dependencies
-bd blocked  # Nothing? Good.
+```
+You: "Spawn workers for all ready beads."
 
-# Spawn all ready work
-wt ready | while read bead; do
-  wt new $bead
-done
+Claude:
+> wt ready
+5 beads ready.
+
+> wt new myproject-abc  # → toast
+> wt new myproject-def  # → shadow
+> wt new myproject-ghi  # → obsidian
+> wt new myproject-jkl  # → quartz
+> wt new myproject-mno  # → jasper
+
+5 workers running in parallel. Use `wt watch` to monitor them.
 ```
 
-Or use auto mode:
+Or let wt handle it automatically:
 
-```bash
-wt auto --max=5
 ```
+You: "Process all ready beads automatically."
+
+Claude:
+> wt auto
+
+Auto mode started. Will process 5 beads sequentially, creating
+PRs as each completes.
+```
+
+## Next Steps
+
+- [Sample Workflows](sample-workflows.md) - More detailed scenarios
+- [Auto Mode](auto-mode.md) - Hands-off batch processing
+- [Seance](seance.md) - Querying past sessions
