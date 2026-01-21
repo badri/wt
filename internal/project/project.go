@@ -19,8 +19,18 @@ type Project struct {
 	MergeMode     string   `json:"merge_mode,omitempty"`
 	RequireCI     bool     `json:"require_ci,omitempty"`
 	AutoMerge     bool     `json:"auto_merge_on_green,omitempty"`
+	AutoRebase    string   `json:"auto_rebase,omitempty"` // "true" (default), "false", or "prompt"
 	TestEnv       *TestEnv `json:"test_env,omitempty"`
 	Hooks         *Hooks   `json:"hooks,omitempty"`
+}
+
+// AutoRebaseMode returns the effective auto-rebase mode for the project.
+// Returns "true" (default), "false", or "prompt".
+func (p *Project) AutoRebaseMode() string {
+	if p.AutoRebase == "" {
+		return "true" // Default: auto-rebase enabled
+	}
+	return p.AutoRebase
 }
 
 // TestEnv contains test environment configuration.

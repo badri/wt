@@ -143,7 +143,7 @@ func TestBuildInitialPrompt(t *testing.T) {
 			wantContains: []string{
 				"Push your changes",
 				"wt done",
-				"merge to main",
+				"auto-rebase on main",
 			},
 			wantNotContains: []string{
 				"wt signal ready",
