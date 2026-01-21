@@ -1097,9 +1097,9 @@ func buildInitialPrompt(beadID, title string, proj *project.Project) string {
 	switch mergeMode {
 	case "direct":
 		sb.WriteString("4. Push your changes\n")
-		sb.WriteString("\nWhen finished, signal completion:\n")
-		sb.WriteString("  wt signal ready \"Changes pushed\"\n")
-		sb.WriteString("\nDo NOT run `wt done` - the hub will handle cleanup.")
+		sb.WriteString("\nWhen finished, merge and close:\n")
+		sb.WriteString("  wt done\n")
+		sb.WriteString("\nThis will merge to main, push, and clean up the worktree.")
 	case "pr-auto":
 		sb.WriteString("4. Create a PR with `gh pr create`\n")
 		sb.WriteString("\nWhen finished, signal completion with the PR URL:\n")

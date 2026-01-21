@@ -142,6 +142,10 @@ func TestBuildInitialPrompt(t *testing.T) {
 			},
 			wantContains: []string{
 				"Push your changes",
+				"wt done",
+				"merge to main",
+			},
+			wantNotContains: []string{
 				"wt signal ready",
 				"Do NOT run `wt done`",
 			},
