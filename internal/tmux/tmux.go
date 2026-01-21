@@ -52,6 +52,12 @@ func NewSession(name, workdir, beadsDir, editorCmd string, opts *SessionOptions)
 		}
 	}
 
+	// Set WT_SESSION for commit message traceability
+	setSessionCmd := exec.Command("tmux", "set-environment", "-t", name, "WT_SESSION", name)
+	if err := setSessionCmd.Run(); err != nil {
+		fmt.Printf("Warning: could not set WT_SESSION in tmux session: %v\n", err)
+	}
+
 	// Send the editor command to start
 	// Prefix with space to avoid shell history (requires HISTCONTROL=ignorespace or setopt HIST_IGNORE_SPACE)
 	if editorCmd != "" {
