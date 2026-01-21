@@ -101,6 +101,7 @@ func parseKillFlags(args []string) killFlags {
 
 type doneFlags struct {
 	mergeMode string
+	noRebase  bool
 }
 
 func parseDoneFlags(args []string) doneFlags {
@@ -112,6 +113,8 @@ func parseDoneFlags(args []string) doneFlags {
 				flags.mergeMode = args[i+1]
 				i++
 			}
+		case "--no-rebase":
+			flags.noRebase = true
 		}
 	}
 	return flags
@@ -607,6 +610,11 @@ func cmdDone(cfg *config.Config, flags doneFlags) error {
 		return fmt.Errorf("you have uncommitted changes. Commit or stash them first")
 	}
 
+	// Check if a rebase is already in progress
+	if merge.IsRebaseInProgress(cwd) {
+		return fmt.Errorf("a rebase is in progress. Resolve conflicts with:\n  1. Edit conflicted files to resolve conflicts\n  2. Stage resolved files: git add <file>\n  3. Continue rebase: git rebase --continue\n  4. Or abort: git rebase --abort")
+	}
+
 	// Get project config
 	mgr := project.NewManager(cfg)
 	proj, err := mgr.Get(sess.Project)
@@ -648,6 +656,56 @@ func cmdDone(cfg *config.Config, flags doneFlags) error {
 	fmt.Printf("  Bead:       %s\n", sess.Bead)
 	fmt.Printf("  Branch:     %s\n", branch)
 	fmt.Printf("  Merge mode: %s\n", mergeMode)
+
+	// Auto-rebase on main unless disabled
+	shouldRebase := !flags.noRebase && proj.AutoRebaseMode() != "false"
+
+	if shouldRebase {
+		fmt.Printf("\nFetching latest %s...\n", defaultBranch)
+		if err := merge.FetchMain(cwd, defaultBranch); err != nil {
+			return fmt.Errorf("fetching %s: %w", defaultBranch, err)
+		}
+
+		// Check if we're behind main
+		behind, err := merge.CommitsBehind(cwd, defaultBranch)
+		if err != nil {
+			fmt.Printf("Warning: could not check commits behind: %v\n", err)
+		} else if behind > 0 {
+			fmt.Printf("Branch is %d commits behind %s. Rebasing...\n", behind, defaultBranch)
+
+			result, err := merge.RebaseOnMain(cwd, defaultBranch)
+			if err != nil {
+				return fmt.Errorf("rebase failed: %w", err)
+			}
+
+			if result.HasConflicts {
+				// Build conflict information message
+				var conflictMsg strings.Builder
+				conflictMsg.WriteString(fmt.Sprintf("Merge conflicts detected in %d file(s):\n", len(result.ConflictedFiles)))
+				for _, file := range result.ConflictedFiles {
+					conflictMsg.WriteString(fmt.Sprintf("  - %s\n", file))
+				}
+				conflictMsg.WriteString("\nTo resolve:\n")
+				conflictMsg.WriteString("  1. Edit each conflicted file and resolve the conflict markers\n")
+				conflictMsg.WriteString("  2. Stage resolved files: git add <file>\n")
+				conflictMsg.WriteString("  3. Continue rebase: git rebase --continue\n")
+				conflictMsg.WriteString("  4. Run 'wt done' again\n")
+				conflictMsg.WriteString("\nOr abort with: git rebase --abort\n")
+				conflictMsg.WriteString("\nConflict resolution guidelines:\n")
+				conflictMsg.WriteString("  - Auto-resolve: trivial conflicts (whitespace, imports, non-overlapping changes)\n")
+				conflictMsg.WriteString("  - Escalate: semantic conflicts, deletion conflicts, business logic changes\n")
+				conflictMsg.WriteString("  - Run tests after resolving to verify correctness\n")
+
+				return fmt.Errorf("%s", conflictMsg.String())
+			}
+
+			fmt.Println("Rebase successful.")
+		} else {
+			fmt.Printf("Branch is up-to-date with %s.\n", defaultBranch)
+		}
+	} else if flags.noRebase {
+		fmt.Println("\nSkipping rebase (--no-rebase flag)")
+	}
 
 	var prURL string
 
@@ -1084,8 +1142,10 @@ func buildInitialPrompt(beadID, title string, proj *project.Project) string {
 	sb.WriteString("2. Commit your changes with descriptive message\n")
 
 	// Add test instructions if configured
+	stepNum := 3
 	if proj != nil && proj.TestEnv != nil {
-		sb.WriteString("3. Run tests and fix any failures\n")
+		sb.WriteString(fmt.Sprintf("%d. Run tests and fix any failures\n", stepNum))
+		stepNum++
 	}
 
 	// Add merge mode instructions
@@ -1096,21 +1156,28 @@ func buildInitialPrompt(beadID, title string, proj *project.Project) string {
 
 	switch mergeMode {
 	case "direct":
-		sb.WriteString("4. Push your changes\n")
+		sb.WriteString(fmt.Sprintf("%d. Push your changes\n", stepNum))
 		sb.WriteString("\nWhen finished, merge and close:\n")
 		sb.WriteString("  wt done\n")
-		sb.WriteString("\nThis will merge to main, push, and clean up the worktree.")
+		sb.WriteString("\nThis will auto-rebase on main, push, and clean up the worktree.")
 	case "pr-auto":
-		sb.WriteString("4. Create a PR with `gh pr create`\n")
+		sb.WriteString(fmt.Sprintf("%d. Create a PR with `gh pr create`\n", stepNum))
 		sb.WriteString("\nWhen finished, signal completion with the PR URL:\n")
 		sb.WriteString("  wt signal ready \"PR: <paste PR URL here>\"\n")
 		sb.WriteString("\nDo NOT run `wt done` - the hub will handle cleanup after merge.")
 	case "pr-review":
-		sb.WriteString("4. Create a PR with `gh pr create`\n")
+		sb.WriteString(fmt.Sprintf("%d. Create a PR with `gh pr create`\n", stepNum))
 		sb.WriteString("\nWhen finished, signal completion with the PR URL:\n")
 		sb.WriteString("  wt signal ready \"PR: <paste PR URL here>\"\n")
 		sb.WriteString("\nDo NOT run `wt done` - the hub will handle cleanup after review.")
 	}
+
+	// Add conflict resolution guidance
+	sb.WriteString("\n\n## Conflict Resolution (if needed)\n")
+	sb.WriteString("If `wt done` reports merge conflicts:\n")
+	sb.WriteString("- Auto-resolve: trivial conflicts (whitespace, imports, non-overlapping changes)\n")
+	sb.WriteString("- Escalate via `wt signal blocked \"<reason>\"`: semantic conflicts, deletion conflicts, business logic\n")
+	sb.WriteString("- After resolving: `git add <file>`, `git rebase --continue`, then `wt done` again\n")
 
 	return sb.String()
 }
