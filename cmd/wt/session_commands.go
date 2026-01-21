@@ -314,6 +314,11 @@ func cmdNew(cfg *config.Config, args []string) error {
 		return fmt.Errorf("creating worktree: %w", err)
 	}
 
+	// Symlink .claude/ from main repo for project-specific configs (MCP servers, hooks, settings)
+	if err := worktree.SymlinkClaudeDir(repoPath, worktreePath); err != nil {
+		fmt.Printf("Warning: could not symlink .claude/: %v\n", err)
+	}
+
 	// beadsDir already set above when validating the bead
 
 	// Allocate port offset if test env is configured
