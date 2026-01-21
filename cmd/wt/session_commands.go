@@ -119,15 +119,18 @@ func parseDoneFlags(args []string) doneFlags {
 
 // SessionJSON is the JSON output format for a session
 type SessionJSON struct {
-	Name          string `json:"name"`
-	Bead          string `json:"bead"`
-	Project       string `json:"project"`
-	Worktree      string `json:"worktree"`
-	Branch        string `json:"branch"`
-	Status        string `json:"status"`
-	StatusMessage string `json:"status_message,omitempty"`
-	CreatedAt     string `json:"created_at"`
-	LastActivity  string `json:"last_activity"`
+	Name                string `json:"name"`
+	Type                string `json:"type"` // "bead" or "task"
+	Bead                string `json:"bead,omitempty"`
+	TaskDescription     string `json:"task_description,omitempty"`
+	CompletionCondition string `json:"completion_condition,omitempty"`
+	Project             string `json:"project"`
+	Worktree            string `json:"worktree"`
+	Branch              string `json:"branch"`
+	Status              string `json:"status"`
+	StatusMessage       string `json:"status_message,omitempty"`
+	CreatedAt           string `json:"created_at"`
+	LastActivity        string `json:"last_activity"`
 }
 
 func cmdList(cfg *config.Config) error {
@@ -149,28 +152,36 @@ func cmdList(cfg *config.Config) error {
 			if status == "" {
 				status = "working"
 			}
+			sessionType := "bead"
+			if sess.IsTask() {
+				sessionType = "task"
+			}
 			sessions = append(sessions, SessionJSON{
-				Name:          name,
-				Bead:          sess.Bead,
-				Project:       sess.Project,
-				Worktree:      sess.Worktree,
-				Branch:        sess.Branch,
-				Status:        status,
-				StatusMessage: sess.StatusMessage,
-				CreatedAt:     sess.CreatedAt,
-				LastActivity:  sess.LastActivity,
+				Name:                name,
+				Type:                sessionType,
+				Bead:                sess.Bead,
+				TaskDescription:     sess.TaskDescription,
+				CompletionCondition: string(sess.CompletionCondition),
+				Project:             sess.Project,
+				Worktree:            sess.Worktree,
+				Branch:              sess.Branch,
+				Status:              status,
+				StatusMessage:       sess.StatusMessage,
+				CreatedAt:           sess.CreatedAt,
+				LastActivity:        sess.LastActivity,
 			})
 		}
 		printJSON(sessions)
 		return nil
 	}
 
-	// Define columns
+	// Define columns - Type column helps distinguish beads from tasks
 	columns := []table.Column{
 		{Title: "Name", Width: 18},
+		{Title: "Type", Width: 6},
 		{Title: "Status", Width: 10},
-		{Title: "Title", Width: 36},
-		{Title: "Project", Width: 14},
+		{Title: "Title", Width: 32},
+		{Title: "Project", Width: 12},
 	}
 
 	// Build rows
@@ -181,22 +192,30 @@ func cmdList(cfg *config.Config) error {
 			status = "working"
 		}
 
-		// Get bead title (use BeadsDir to find correct project)
+		// Determine type and title based on session type
+		sessionType := "bead"
 		title := ""
-		if beadInfo, err := bead.ShowInDir(sess.Bead, sess.BeadsDir); err == nil && beadInfo != nil {
-			title = beadInfo.Title
+		if sess.IsTask() {
+			sessionType = "task"
+			title = sess.TaskDescription
+		} else {
+			// Get bead title (use BeadsDir to find correct project)
+			if beadInfo, err := bead.ShowInDir(sess.Bead, sess.BeadsDir); err == nil && beadInfo != nil {
+				title = beadInfo.Title
+			}
 		}
 
 		rows = append(rows, table.Row{
 			name,
+			sessionType,
 			status,
-			truncate(title, 36),
-			truncate(sess.Project, 14),
+			truncate(title, 32),
+			truncate(sess.Project, 12),
 		})
 	}
 
 	printTable("Active Sessions", columns, rows)
-	fmt.Println("\nCommands: wt <name> (switch) | wt new <bead> | wt close <name>")
+	fmt.Println("\nCommands: wt <name> (switch) | wt new <bead> | wt task <desc> | wt close <name>")
 
 	return nil
 }
@@ -577,6 +596,11 @@ func cmdDone(cfg *config.Config, flags doneFlags) error {
 
 	if sess == nil {
 		return fmt.Errorf("not in a wt session. Run this from inside a session worktree")
+	}
+
+	// Handle task sessions differently
+	if sess.IsTask() {
+		return cmdDoneTask(cfg, state, sessionName, sess, cwd)
 	}
 
 	// Check for uncommitted changes

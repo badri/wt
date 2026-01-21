@@ -77,3 +77,32 @@ func checkBranchExists(repoPath, branch string) bool {
 	cmd = exec.Command("git", "-C", repoPath, "show-ref", "--verify", "--quiet", "refs/remotes/origin/"+branch)
 	return cmd.Run() == nil
 }
+
+// CreateFromBranch creates a worktree with a new branch starting from a base branch
+func CreateFromBranch(repoPath, worktreePath, newBranch, baseBranch string) error {
+	// Ensure worktree parent directory exists
+	parentDir := filepath.Dir(worktreePath)
+	if err := os.MkdirAll(parentDir, 0755); err != nil {
+		return fmt.Errorf("creating worktree directory: %w", err)
+	}
+
+	// Check if branch already exists
+	if checkBranchExists(repoPath, newBranch) {
+		// Use existing branch
+		cmd := exec.Command("git", "-C", repoPath, "worktree", "add", worktreePath, newBranch)
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("git worktree add: %s: %w", string(output), err)
+		}
+		return nil
+	}
+
+	// Create new branch from base
+	cmd := exec.Command("git", "-C", repoPath, "worktree", "add", "-b", newBranch, worktreePath, baseBranch)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git worktree add: %s: %w", string(output), err)
+	}
+
+	return nil
+}
