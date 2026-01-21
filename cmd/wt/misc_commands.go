@@ -44,6 +44,11 @@ func parseAutoFlags(args []string) *auto.Options {
 				fmt.Sscanf(args[i+1], "%d", &opts.Timeout)
 				i++
 			}
+		case "-n", "--limit":
+			if i+1 < len(args) {
+				fmt.Sscanf(args[i+1], "%d", &opts.Limit)
+				i++
+			}
 		case "--dry-run":
 			opts.DryRun = true
 		case "--check":
@@ -71,6 +76,7 @@ DESCRIPTION:
 OPTIONS:
     -p, --project <name>    Only process beads from specified project
     -m, --merge-mode <mode> Merge mode: direct, pr-auto, pr-review
+    -n, --limit <count>     Maximum number of beads to process
     --timeout <minutes>     Session timeout in minutes (default: 30)
     --dry-run               Show what would be done without executing
     --check                 Check status of running auto sessions
@@ -80,6 +86,7 @@ OPTIONS:
 EXAMPLES:
     wt auto                         Start processing all ready beads
     wt auto -p myproject            Process beads from myproject only
+    wt auto -n 3                    Process at most 3 beads
     wt auto --dry-run               Preview what would be processed
     wt auto --check                 Check auto runner status
     wt auto --stop                  Stop the auto runner
