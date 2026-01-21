@@ -291,9 +291,10 @@ func clearTmuxHistory() {
 }
 
 // HubPrompt is the context prompt injected when starting Claude in hub mode
-const HubPrompt = "You are in the **hub session**. For queries about ready/available work, use `wt ready` (not bd ready) to see work across ALL registered projects. Prefer /wt skill over /beads:ready in this context."
+// Note: Avoid backticks as they cause shell interpretation issues in tmux respawn-pane
+const HubPrompt = "You are in the hub session. For queries about ready/available work, use 'wt ready' (not bd ready) to see work across ALL registered projects. Prefer /wt skill over /beads:ready in this context."
 
-// respawnClaude respawns Claude in the current tmux pane
+// respawnClaude respawns Claude in the hub's main pane (pane 0)
 func respawnClaude(cfg *config.Config) error {
 	// Check if we're in tmux
 	if os.Getenv("TMUX") == "" {
@@ -320,8 +321,20 @@ func respawnClaude(cfg *config.Config) error {
 	// Build respawn command - start fresh Claude with same flags
 	respawnCmd := fmt.Sprintf("cd %s && exec %s", cwd, editorCmd)
 
-	// Use tmux respawn-pane to replace current process
-	cmd := exec.Command("tmux", "respawn-pane", "-k", respawnCmd)
+	// Determine target pane - explicitly target hub.0 when in hub session
+	// to avoid accidentally respawning the watch pane
+	targetPane := ""
+	if os.Getenv("WT_HUB") == "1" {
+		targetPane = "hub.0"
+	}
+
+	// Use tmux respawn-pane to replace the pane process
+	var cmd *exec.Cmd
+	if targetPane != "" {
+		cmd = exec.Command("tmux", "respawn-pane", "-k", "-t", targetPane, respawnCmd)
+	} else {
+		cmd = exec.Command("tmux", "respawn-pane", "-k", respawnCmd)
+	}
 	return cmd.Run()
 }
 
