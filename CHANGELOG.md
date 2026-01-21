@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-01-21
+
+### Added
+- `wt task <description>` - Lightweight task sessions for transient work without beads
+- `wt bead create` - Create beads from within task sessions when work needs tracking
+- `wt prime --hook` - Capture session ID from Claude's SessionStart hook for seance
+- Session name included in worker commit messages via `WT_SESSION` environment variable
+- Merge conflict detection and auto-rebase in `wt done`
+- Workers self-merge for direct mode projects (no PR creation)
+- `wt seance --spawn` - Resume past sessions in new tmux session
+
+### Fixed
+- Namepool now correctly skips already-used session names
+- Worker startup race conditions - uses `NewSessionWithCommand` pattern
+- Session ID capture for seance now works reliably via `wt prime --hook`
+- `wt new` now finds project before validating bead (works from hub)
+- Project config always loaded in `wt new` (fixes merge mode defaulting to pr-review)
+- Worktree path collisions resolved by using bead ID for paths
+- `wt close` now context-aware (works from hub or worker)
+- `WT_HUB` env var properly available to hub shell
+- `--dangerously-skip-permissions` used correctly for seance resume and handoff
+
+### Changed
+- Handoff system simplified from bead-based to file-based
+- Documentation rewritten with conversation-first approach
+- Prompt for merge mode when registering new projects
+
 ## [0.3.0] - 2026-01-20
 
 ### Added
