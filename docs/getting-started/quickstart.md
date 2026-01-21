@@ -1,118 +1,131 @@
 # Quick Start
 
-This guide will get you up and running with wt in 5 minutes.
+This guide will get you up and running with wt in 5 minutes. wt is designed to be used conversationally through Claude—you describe what you want, and Claude handles the commands.
 
-## 1. Register a Project
+## Prerequisites
 
-First, register your project with wt:
+Before starting, ensure you have:
 
-```bash
-wt project add myproject ~/code/myproject
-```
+1. Installed wt ([Installation](installation.md))
+2. Set up the wt skill for Claude Code ([Installation - Skill Setup](installation.md#claude-code-skill-setup))
+3. At least one project with beads (`bd init` in your project)
 
-This tells wt where your project lives and enables session management for it.
+## 1. Start the Hub
 
-## 2. Find Work
-
-See what beads are ready to work on:
-
-```bash
-wt ready
-# Or for a specific project:
-wt ready myproject
-```
-
-## 3. Spawn a Session
-
-Create a new session for a bead:
-
-```bash
-wt new myproject-abc123
-```
-
-This will:
-
-1. Create a git worktree in `~/worktrees/<session-name>/`
-2. Create a new branch from the bead ID
-3. Start a tmux session
-4. Launch Claude Code in the session
-5. Mark the bead as `in_progress`
-
-You'll see output like:
+The hub is your command center for orchestrating work across projects.
 
 ```
-Spawned session 'toast' for bead myproject-abc123
-  Worktree: ~/worktrees/toast
-  Branch: myproject-abc123
-  Port offset: 1
+You: "Start the hub"
+Claude: [runs wt hub, you're now in the hub session with a watch pane]
 ```
 
-## 4. Work in the Session
+You'll see a split view: Claude on the left, session monitor on the right.
 
-You're now inside a Claude Code session. Work on your task as normal.
+## 2. Register Your Project
 
-Check your session status anytime:
+Tell Claude about projects you want to manage:
 
-```bash
-wt status
+```
+You: "Register my project at ~/code/myapp"
+Claude: [runs wt project add myapp ~/code/myapp]
+       "Registered project 'myapp' at ~/code/myapp"
 ```
 
-## 5. List All Sessions
+## 3. Find Available Work
 
-Open another terminal to see all active sessions:
+Ask what's ready to work on:
 
-```bash
-wt
+```
+You: "What's ready?"
+Claude: [runs wt ready]
+       "3 beads are ready across your projects:
+        - myapp-abc: Add user authentication (P1)
+        - myapp-def: Fix login timeout bug (P2)
+        - backend-xyz: Update API docs (P3)"
 ```
 
-Output:
+## 4. Spawn a Worker
+
+Start a worker session for a specific task:
+
 ```
-┌─ Active Sessions ────────────────────────────────────────┐
-│ 🟢 toast    myproject-abc   Working   Add auth flow     │
-└──────────────────────────────────────────────────────────┘
-```
-
-## 6. Switch Between Sessions
-
-Jump to a different session:
-
-```bash
-wt toast
-# or
-wt shadow
+You: "Work on the auth task"
+Claude: [runs wt new myapp-abc]
+       "Spawned worker 'toast' for myapp-abc
+        - Worktree: ~/worktrees/toast
+        - Branch: myapp-abc
+        Worker is starting on the task."
 ```
 
-## 7. Complete Your Work
+The worker (another Claude session) begins working autonomously in its isolated environment.
 
-When you're done with the task:
+## 5. Monitor Progress
 
-```bash
-wt done
+Check on your workers anytime:
+
+```
+You: "How are the workers doing?"
+Claude: [runs wt list]
+       "1 active worker:
+        🟢 toast - myapp-abc - Working - 'Implementing OAuth flow...'"
 ```
 
-This will:
+Or use the watch pane (right side of hub) for real-time updates.
 
-1. Commit your changes
-2. Push to the remote
-3. Create a PR (depending on merge mode)
-4. Update the bead status
+## 6. Check on a Specific Worker
 
-## 8. Close the Session
+Switch to a worker to see what it's doing:
 
-Clean up the session and worktree:
-
-```bash
-wt close toast
+```
+You: "Switch to toast"
+Claude: [runs wt toast]
+       [You're now in the toast session]
 ```
 
-Or from inside the session:
+Use `Ctrl-b d` to detach back to the hub.
 
-```bash
-wt close
+## 7. Close Completed Work
+
+When a worker signals completion:
+
+```
+You: "Close toast"
+Claude: [runs wt close toast]
+       "Closed session 'toast'
+        - PR created: https://github.com/org/myapp/pull/42
+        - Bead myapp-abc marked complete
+        - Worktree cleaned up"
+```
+
+## The Flow
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  HUB (You + Claude)                                         │
+│                                                             │
+│  You: "What's ready?"                                       │
+│  You: "Spawn a worker for task X"                           │
+│  You: "How's it going?"                                     │
+│  You: "Close the finished worker"                           │
+│                                                             │
+└─────────────────────┬───────────────────────────────────────┘
+                      │ spawns/monitors
+                      ▼
+┌─────────────────────────────────────────────────────────────┐
+│  WORKERS (Claude instances)                                 │
+│                                                             │
+│  toast: Working on myapp-abc in ~/worktrees/toast           │
+│  shadow: Working on backend-xyz in ~/worktrees/shadow       │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
 ```
 
 ## What's Next?
 
-- [Hub Workflow](../guides/hub-workflow.md) - Learn the hub/worker pattern
-- [Commands Reference](../commands/hub.md) - Full command reference
+- [Hub Workflow](../guides/hub-workflow.md) - Deep dive into the hub/worker pattern
+- [Shell Integration](shell-integration.md) - Tmux keybindings and completions
 - [Configuration](../reference/configuration.md) - Customize wt behavior
+
+## CLI Reference
+
+For power users who want direct CLI access, see [Commands Reference](../commands/). The commands Claude runs are the same ones you can run manually.
