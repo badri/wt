@@ -1,6 +1,16 @@
 # Configuration Commands
 
-Commands for managing wt configuration.
+Configuration is typically done once during setup. You can ask Claude to help:
+
+```
+You: "Register my project at ~/code/myapp"
+Claude: [runs wt project add myapp ~/code/myapp] Done. How should completed work be merged?
+
+You: "Configure it for PR review"
+Claude: [updates config] Set merge_mode to pr-review.
+```
+
+This page documents the configuration commands and options for reference.
 
 ## Config Management
 

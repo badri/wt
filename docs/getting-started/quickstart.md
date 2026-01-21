@@ -134,4 +134,4 @@ Claude: [runs wt close toast]
 
 ## CLI Reference
 
-For power users who want direct CLI access, see [Commands Reference](../commands/). The commands Claude runs are the same ones you can run manually.
+For power users who want to understand what Claude runs, see [Commands Reference](../commands/). You can run these commands manually, but the conversational approach is the intended way to use wt.

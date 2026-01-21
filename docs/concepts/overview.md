@@ -1,15 +1,15 @@
 # Concepts Overview
 
-wt is built around a few key concepts that work together to provide isolated, persistent agent sessions.
+wt lets you orchestrate multiple AI coding agents through conversation. You talk to Claude in your hub session, and Claude manages the workers.
 
 ## The wt Model
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│                         Hub Session                          │
+│                    Hub (You + Claude)                         │
 │  ┌────────────────────────────────────────────────────────┐ │
-│  │  Orchestrator (you or Claude) grooms beads, spawns     │ │
-│  │  workers, monitors progress, reviews PRs               │ │
+│  │  You describe what you want. Claude spawns workers,    │ │
+│  │  monitors progress, handles blockers, reviews PRs.     │ │
 │  └────────────────────────────────────────────────────────┘ │
 └──────────────────────────────────────────────────────────────┘
          │                    │                    │
@@ -45,10 +45,10 @@ Sessions don't auto-cleanup or expire. They persist until you explicitly close t
 
 ### Hub/Worker Pattern
 
-wt encourages a hub/worker pattern:
+wt uses a hub/worker pattern:
 
-- **Hub**: Where you groom beads, spawn workers, monitor progress
-- **Workers**: Isolated sessions where Claude works on specific tasks
+- **Hub**: A conversation with Claude where you plan work and orchestrate workers
+- **Workers**: Isolated sessions where other Claude instances work autonomously on tasks
 
 ## Key Components
 
@@ -62,9 +62,10 @@ wt encourages a hub/worker pattern:
 
 ## Typical Workflow
 
-1. **Groom beads** - Use `bd ready` to see available work
-2. **Spawn workers** - `wt new <bead-id>` creates isolated sessions
-3. **Monitor progress** - `wt watch` shows live status
-4. **Review work** - Check PRs or use `wt seance` to query past sessions
-5. **Complete work** - `wt done` commits and creates PRs
-6. **Cleanup** - `wt close` removes sessions and worktrees
+From your hub (a conversation with Claude):
+
+1. **"What's ready?"** — Claude shows available beads
+2. **"Spawn a worker for the auth task"** — Claude creates an isolated session
+3. **"How are the workers doing?"** — Claude shows live status
+4. **"Toast says it's done. What did it change?"** — Claude reviews the PR
+5. **"Close toast"** — Claude completes the work and cleans up

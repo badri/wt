@@ -1,6 +1,18 @@
 # Hub Commands
 
-Hub commands are run from your orchestration session to manage workers and view status.
+Hub commands are what Claude runs when you ask it to manage workers from your hub session.
+
+**Conversational equivalent:** Instead of memorizing these commands, just tell Claude what you want:
+
+| You say... | Claude runs... |
+|------------|----------------|
+| "What work is ready?" | `wt ready` |
+| "Spawn a worker for the auth task" | `wt new myproject-abc` |
+| "How are the workers doing?" | `wt` or `wt watch` |
+| "Switch to toast" | `wt toast` |
+| "Close toast" | `wt close toast` |
+
+This page documents the commands for reference.
 
 ## Session Management
 

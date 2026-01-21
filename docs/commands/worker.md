@@ -1,6 +1,10 @@
 # Worker Commands
 
-Worker commands are run from inside a wt session (the worker's tmux environment).
+Worker commands are run by Claude inside a worker session. When you spawn a worker, it operates autonomously—you rarely need to know these commands.
+
+**When workers use these:** Claude running inside a worker session uses these commands to signal status, complete work, and communicate with the hub. You observe the results from your hub session.
+
+This page documents what happens inside workers for reference.
 
 ## Session Info
 
