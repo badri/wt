@@ -108,6 +108,9 @@ func run() error {
 		}
 		return cmdProject(cfg, args[1:])
 	case "auto":
+		if hasHelpFlag(args[1:]) {
+			return cmdAutoHelp()
+		}
 		return cmdAuto(cfg, args[1:])
 	case "events":
 		return cmdEvents(cfg, args[1:])
