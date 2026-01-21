@@ -41,6 +41,7 @@ type Options struct {
 	Stop      bool
 	Force     bool
 	Timeout   int // minutes, 0 means use project default
+	Limit     int // max beads to process, 0 means no limit
 }
 
 // Runner manages the auto execution loop
@@ -149,7 +150,13 @@ func (r *Runner) processProject(proj *project.Project) error {
 		return nil
 	}
 
-	fmt.Printf("Found %d ready bead(s) in project %s.\n", len(readyBeads), proj.Name)
+	// Apply limit if specified
+	if r.opts.Limit > 0 && len(readyBeads) > r.opts.Limit {
+		fmt.Printf("Found %d ready bead(s) in project %s, limiting to %d.\n", len(readyBeads), proj.Name, r.opts.Limit)
+		readyBeads = readyBeads[:r.opts.Limit]
+	} else {
+		fmt.Printf("Found %d ready bead(s) in project %s.\n", len(readyBeads), proj.Name)
+	}
 
 	// Handle --check flag
 	if r.opts.Check {
