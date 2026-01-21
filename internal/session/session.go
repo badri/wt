@@ -32,6 +32,7 @@ type Session struct {
 	LastActivity  string `json:"last_activity"`
 	Status        string `json:"status"`                   // working, idle, ready, blocked, error
 	StatusMessage string `json:"status_message,omitempty"` // Optional message (e.g., PR URL, error details)
+	ThemeName     string `json:"theme_name,omitempty"`     // Allocated name from namepool (without project prefix)
 
 	// Task session fields
 	Type                SessionType         `json:"type,omitempty"`                 // "bead" or "task"

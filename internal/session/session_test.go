@@ -136,6 +136,48 @@ func TestUsedNames(t *testing.T) {
 	}
 }
 
+func TestUsedNames_WithThemeName(t *testing.T) {
+	// When ThemeName is set, UsedNames should return the theme name (not session name)
+	// This is critical for namepool allocation to skip already-used theme names
+	state := &State{
+		Sessions: map[string]*Session{
+			"proj-toast":  {ThemeName: "toast"},  // Has ThemeName
+			"proj-shadow": {ThemeName: "shadow"}, // Has ThemeName
+			"legacy":      {},                    // No ThemeName (backwards compatibility)
+		},
+	}
+
+	names := state.UsedNames()
+	if len(names) != 3 {
+		t.Errorf("expected 3 used names, got %d", len(names))
+	}
+
+	// Check the correct names are returned
+	found := make(map[string]bool)
+	for _, name := range names {
+		found[name] = true
+	}
+
+	// Sessions with ThemeName should return the theme name
+	if !found["toast"] {
+		t.Error("expected 'toast' (theme name), not 'proj-toast' (session name)")
+	}
+	if !found["shadow"] {
+		t.Error("expected 'shadow' (theme name), not 'proj-shadow' (session name)")
+	}
+	// Sessions without ThemeName fall back to session name
+	if !found["legacy"] {
+		t.Error("expected 'legacy' (session name) for backwards compatibility")
+	}
+	// Session names should NOT be returned when ThemeName exists
+	if found["proj-toast"] {
+		t.Error("should not return session name 'proj-toast' when ThemeName 'toast' exists")
+	}
+	if found["proj-shadow"] {
+		t.Error("should not return session name 'proj-shadow' when ThemeName 'shadow' exists")
+	}
+}
+
 func TestFindByBead(t *testing.T) {
 	state := &State{
 		Sessions: map[string]*Session{
