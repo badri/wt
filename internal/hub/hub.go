@@ -151,20 +151,18 @@ func create(cfg *config.Config, opts *Options) error {
 		homeDir = "/"
 	}
 
-	// Create detached tmux session
+	// Create detached tmux session with WT_HUB=1 set from the start
+	// Using -e flag ensures the shell inherits the env var immediately
 	cmd := exec.Command("tmux", "new-session",
 		"-d",                 // detached
 		"-s", HubSessionName, // session name
-		"-c", homeDir, // working directory
+		"-c", homeDir,        // working directory
+		"-e", "WT_HUB=1",     // mark as hub session for child processes
 	)
 
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("creating hub session: %w", err)
 	}
-
-	// Set a marker environment variable to identify hub session
-	setEnvCmd := exec.Command("tmux", "set-environment", "-t", HubSessionName, "WT_HUB", "1")
-	_ = setEnvCmd.Run() // Non-fatal if this fails
 
 	// Get editor command from config
 	editorCmd := cfg.EditorCmd
