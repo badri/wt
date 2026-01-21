@@ -57,6 +57,38 @@ func parseAutoFlags(args []string) *auto.Options {
 	return opts
 }
 
+// cmdAutoHelp prints help for the auto command
+func cmdAutoHelp() error {
+	help := `wt auto - Autonomous batch processing of beads
+
+USAGE:
+    wt auto [options]
+
+DESCRIPTION:
+    Autonomously processes ready beads by spawning worker sessions,
+    monitoring their progress, and merging completed work.
+
+OPTIONS:
+    -p, --project <name>    Only process beads from specified project
+    -m, --merge-mode <mode> Merge mode: direct, pr-auto, pr-review
+    --timeout <minutes>     Session timeout in minutes (default: 30)
+    --dry-run               Show what would be done without executing
+    --check                 Check status of running auto sessions
+    --stop                  Stop the auto runner gracefully
+    --force                 Force start even if another auto is running
+
+EXAMPLES:
+    wt auto                         Start processing all ready beads
+    wt auto -p myproject            Process beads from myproject only
+    wt auto --dry-run               Preview what would be processed
+    wt auto --check                 Check auto runner status
+    wt auto --stop                  Stop the auto runner
+    wt auto --timeout 60            Set 60 minute timeout per session
+`
+	fmt.Print(help)
+	return nil
+}
+
 // cmdEvents shows wt events
 func cmdEvents(cfg *config.Config, args []string) error {
 	logger := events.NewLogger(cfg)
