@@ -44,10 +44,17 @@ func (s *State) Save() error {
 	return os.WriteFile(s.path, data, 0644)
 }
 
+// UsedNames returns theme names that have been allocated from namepools.
+// This is used by namepool.Allocate() to skip already-used names.
 func (s *State) UsedNames() []string {
 	names := make([]string, 0, len(s.Sessions))
-	for name := range s.Sessions {
-		names = append(names, name)
+	for sessionName, sess := range s.Sessions {
+		// Use ThemeName if available, fall back to session name for backwards compatibility
+		if sess.ThemeName != "" {
+			names = append(names, sess.ThemeName)
+		} else {
+			names = append(names, sessionName)
+		}
 	}
 	return names
 }

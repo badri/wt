@@ -185,8 +185,10 @@ func cmdTask(cfg *config.Config, args []string) error {
 	}
 
 	sessionName := flags.name
+	var themeName string // Track allocated name for namepool deduplication
 	if sessionName == "" {
-		themeName, err := pool.Allocate(state.UsedNames())
+		var err error
+		themeName, err = pool.Allocate(state.UsedNames())
 		if err != nil {
 			return err
 		}
@@ -278,6 +280,7 @@ func cmdTask(cfg *config.Config, args []string) error {
 		Type:                session.SessionTypeTask,
 		TaskDescription:     description,
 		CompletionCondition: condition,
+		ThemeName:           themeName, // Track allocated name for namepool deduplication
 	}
 	sess.UpdateActivity()
 

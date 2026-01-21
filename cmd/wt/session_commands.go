@@ -291,8 +291,10 @@ func cmdNew(cfg *config.Config, args []string) error {
 	}
 
 	sessionName := flags.name
+	var themeName string // Track allocated name for namepool deduplication
 	if sessionName == "" {
-		themeName, err := pool.Allocate(state.UsedNames())
+		var err error
+		themeName, err = pool.Allocate(state.UsedNames())
 		if err != nil {
 			return err
 		}
@@ -382,6 +384,7 @@ func cmdNew(cfg *config.Config, args []string) error {
 		BeadsDir:   beadsDir,
 		Status:     "working",
 		CreatedAt:  session.Now(),
+		ThemeName:  themeName, // Track allocated name for namepool deduplication
 	}
 	sess.UpdateActivity()
 
