@@ -243,10 +243,10 @@ func (r *Runner) createSession(beadID string) (string, error) {
 	}
 
 	// Parse session name from output
-	// Expected: "Created session 'toast' for bead wt-xyz"
+	// Expected: "Session 'toast' ready."
 	lines := strings.Split(string(output), "\n")
 	for _, line := range lines {
-		if strings.Contains(line, "Created session") {
+		if strings.Contains(line, "Session") && strings.Contains(line, "ready") {
 			// Extract session name between quotes
 			start := strings.Index(line, "'")
 			if start >= 0 {
