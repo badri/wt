@@ -272,9 +272,32 @@ Shows: name, repo path, merge mode, active session count
 
 ### Registering Projects
 
-```bash
-wt project add <name> <path>
-wt project add myapp ~/myapp
+When a user asks to register a project, **always ask about the merge mode** before completing registration:
+
+1. Ask the user which merge mode they prefer:
+   - `direct` - Merge directly to main, no PR (fast, for solo work)
+   - `pr-auto` - Create PR, auto-merge when CI passes (balanced)
+   - `pr-review` - Create PR, wait for human review (default, safest)
+
+2. Register the project:
+   ```bash
+   wt project add <name> <path>
+   ```
+
+3. Configure the merge mode:
+   ```bash
+   wt project config <name>    # Opens in $EDITOR, set merge_mode
+   ```
+
+**Example conversation:**
+```
+User: "Register ~/code/myapp"
+You: "I'll register that. How should completed work be merged?
+      - direct: Merge directly to main (no PR)
+      - pr-auto: Create PR, auto-merge when CI passes
+      - pr-review: Create PR, wait for human review"
+User: "pr-auto"
+You: [register project and set merge_mode to pr-auto]
 ```
 
 ### Configuring Projects

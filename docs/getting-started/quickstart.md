@@ -27,8 +27,14 @@ Tell Claude about projects you want to manage:
 
 ```
 You: "Register my project at ~/code/myapp"
+Claude: "I'll register that project. How should completed work be merged?"
+        - direct: Merge directly to main (no PR)
+        - pr-auto: Create PR, auto-merge when CI passes
+        - pr-review: Create PR, wait for human review
+You: "pr-review"
 Claude: [runs wt project add myapp ~/code/myapp]
-       "Registered project 'myapp' at ~/code/myapp"
+        [runs wt project config to set merge_mode]
+       "Registered 'myapp' with pr-review merge mode"
 ```
 
 ## 3. Find Available Work
