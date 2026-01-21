@@ -214,6 +214,58 @@ wt new foo-frontend-def --no-switch
 
 ---
 
+## Task Sessions (Lightweight, Non-Bead)
+
+Task sessions are lightweight alternatives to bead sessions for transient work that doesn't need issue tracking.
+
+### When to Use Tasks vs Beads
+
+| Use Tasks | Use Beads |
+|-----------|-----------|
+| Quick investigations | Strategic work |
+| MCP queries | Multi-session work |
+| PR conflict resolution | Work with dependencies |
+| Temporary experiments | Needs tracking/history |
+
+### Creating Task Sessions
+
+```bash
+wt task <description>                           # Simple task, no conditions
+wt task "Investigate slow query" --condition none
+wt task "Fix PR conflicts" --condition user-confirm
+wt task "Run integration tests" --condition tests-pass --project myapp
+wt task "Push hotfix" --condition pushed
+wt task "Submit PR" --condition pr-merged
+```
+
+**Completion conditions:**
+- `none` - No checks, completes immediately with `wt done`
+- `pushed` - Verifies changes are pushed to remote
+- `pr-merged` - Waits for PR to be merged
+- `tests-pass` - Runs test suite before completing
+- `user-confirm` - Requires user confirmation
+
+**Task workflow:**
+1. Hub spawns task: `wt task "description" --condition X`
+2. Task runs in isolated worktree with branch `task/<description>`
+3. Worker completes task and signals: `wt signal ready "message"`
+4. Hub verifies condition and runs: `wt done`
+
+### Listing Tasks
+
+Tasks appear in `wt list` with type "task":
+
+```
+Active Sessions
+
+     Name               Type   Status      Title                           Project
+────────────────────────────────────────────────────────────────────────────────────
+     wt-toast           bead   working     Add login feature               myapp
+     myapp-task-shadow  task   ready       Fix PR conflicts                myapp
+```
+
+---
+
 ## Session Lifecycle
 
 ### Completing Work
@@ -700,6 +752,8 @@ wt list --json | jq 'group_by(.project) | map({project: .[0].project, count: len
 | `wt new <bead>` | Spawn worker for bead (stays in hub) |
 | `wt new <bead> --switch` | Spawn and switch to worker |
 | `wt new <bead> --no-test-env` | Spawn without test env setup |
+| `wt task <desc>` | Spawn lightweight task session |
+| `wt task <desc> --condition X` | Task with completion condition |
 | `wt <name>` | Switch to session |
 | `wt watch` | Interactive TUI (↑↓ navigate, Enter switch, q quit) |
 | `wt status` | Current session info (in worker) |

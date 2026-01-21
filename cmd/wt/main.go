@@ -134,6 +134,11 @@ func run() error {
 			return cmdHubHelp()
 		}
 		return cmdHub(cfg, args[1:])
+	case "task":
+		if len(args) < 2 || hasHelpFlag(args[1:]) {
+			return cmdTaskHelp()
+		}
+		return cmdTask(cfg, args[1:])
 	default:
 		// Assume it's a session name or bead ID to switch to
 		return cmdSwitch(cfg, args[0])

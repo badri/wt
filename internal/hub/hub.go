@@ -156,8 +156,8 @@ func create(cfg *config.Config, opts *Options) error {
 	cmd := exec.Command("tmux", "new-session",
 		"-d",                 // detached
 		"-s", HubSessionName, // session name
-		"-c", homeDir,        // working directory
-		"-e", "WT_HUB=1",     // mark as hub session for child processes
+		"-c", homeDir, // working directory
+		"-e", "WT_HUB=1", // mark as hub session for child processes
 	)
 
 	if err := cmd.Run(); err != nil {
@@ -169,7 +169,7 @@ func create(cfg *config.Config, opts *Options) error {
 	if editorCmd != "" {
 		// Append hub context prompt so Claude knows it's in hub mode
 		hubPrompt := `You are in the **hub session**. For queries about ready/available work, use ` + "`wt ready`" + ` (not bd ready) to see work across ALL registered projects. Prefer /wt skill over /beads:ready in this context.`
-		fullCmd := fmt.Sprintf("%s -p %q", editorCmd, hubPrompt)
+		fullCmd := fmt.Sprintf("%s --append-system-prompt %q", editorCmd, hubPrompt)
 
 		// Send the editor command to start
 		// Prefix with space to avoid shell history

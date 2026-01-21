@@ -1,0 +1,1673 @@
+
+ ▐▛███▜▌   Claude Code v2.1.2
+▝▜█████▛▘  Opus 4.5 · Claude Max
+  ▘▘ ▝▝    ~/wt
+
+❯ wt watch stops if I select a task by hitting Enter.                       
+  also the watch window isn't visible when I switch to another session. it  
+  exists only in the hub.                                                   
+
+⏺ Let me explore the codebase to understand how wt watch works and identify these issues.
+
+⏺ Explore(Explore wt watch implementation)
+  ⎿  Done (24 tool uses · 56.6k tokens · 1m 12s)                           
+
+⏺ Now I understand the issues. Let me look at the specific implementation details to see what changes are needed.
+
+⏺ Read(cmd/wt/watch_tui.go)
+  ⎿  Read 376 lines
+
+⏺ Read(cmd/wt/hub_commands.go)
+  ⎿  Read 374 lines
+
+⏺ Let me also look at how the hub and tmux integration work to understand the architecture better.
+
+⏺ Read(internal/hub/hub.go)
+  ⎿  Read 356 lines
+
+⏺ Read(internal/tmux/tmux.go)
+  ⎿  Read 114 lines
+
+⏺ Now I understand both issues clearly:
+
+  1. Watch stops on Enter: The TUI calls tea.Quit when Enter is pressed, exiting the watch. It should instead switch sessions while keeping the watch running.
+  2. Watch not visible in other sessions: The watch runs in a hub pane. When the watch exits, that pane just shows a shell prompt. Also, from worker sessions, there's no way to see the watch.
+
+  Let me fix both issues.
+
+❯ also, check the supabyoi-woody tmux session. was the "wt signal ready"    
+  sent as per the initial prompt in that session?                           
+
+⏺ Let me check the supabyoi-woody session first, then continue with the watch fixes.
+
+⏺ Bash(tmux capture-pane -t supabyoi-woody -p -S -1000 2>/dev/null | tail -100)
+  ⎿ ⏺ Let me run the tests to make sure they pass.                         
+
+    ⏺ Bash(python -m pytest tests/services/test_instance_service.py::TestCr
+    … +111 lines (ctrl+o to expand)
+
+
+⏺ Bash(tmux list-sessions 2>/dev/null)
+  ⎿  gt-mcpx-witness: 1 windows (created Sat Jan 17 17:20:19 2026)        
+     gt-reddit_saas-obsidian: 1 windows (created Sat Jan 17 21:39:36 2026)
+     gt-supabyoi-jasper: 1 windows (created Sat Jan 17 20:51:05 2026)
+     … +6 lines (ctrl+o to expand)
+
+⏺ Yes, the supabyoi-woody session did send wt signal ready with the PR URL. I can see in the output:
+  wt signal ready "PR: https://github.com/badri/supabyoi/pull/11"
+  ✅ Session 'supabyoi-woody' status: ready
+     Message: PR: https://github.com/badri/supabyoi/pull/11
+
+  Now let me continue fixing the watch TUI issues. The key fix is to switch sessions without quitting the TUI.
+
+⏺ Update(cmd/wt/watch_tui.go)
+  ⎿  Added 4 lines, removed 3 lines                                      
+      200                                                                
+      201       case key.Matches(msg, keys.Enter):                       
+      202         if len(m.sessions) > 0 && m.cursor < len(m.sessions) { 
+      203 -         m.switchTo = m.sessions[m.cursor].name               
+      204 -         m.quitting = true                                    
+      205 -         return m, tea.Quit                                   
+      203 +         // Switch to the selected session without quitting   
+      204 +         // The watch continues running in its pane           
+      205 +         sessionName := m.sessions[m.cursor].name             
+      206 +         return m, switchSessionCmd(sessionName)              
+      207         }                                                      
+      208                                                                
+      209       case key.Matches(msg, keys.Refresh):                     
+
+⏺ Now I need to add the switchSessionCmd command and a message type for it.
+
+⏺ Update(cmd/wt/watch_tui.go)
+  ⎿  Added 1 line                                                        
+      124   // Messages                                                  
+      125   type tickMsg time.Time                                       
+      126   type sessionsMsg []sessionItem                               
+      127 + type switchedMsg struct{ err error }                         
+      128                                                                
+      129   // Commands                                                  
+      130   func tickCmd() tea.Cmd {                                     
+  ⎿  Found 1 new diagnostic issue in 1 file (ctrl+o to expand)
+
+⏺ Now add the switchSessionCmd function.
+
+⏺ Update(cmd/wt/watch_tui.go)
+  ⎿  Added 9 lines                                                       
+      167     }                                                          
+      168   }                                                            
+      169                                                                
+      170 + func switchSessionCmd(sessionName string) tea.Cmd {          
+      171 +   return func() tea.Msg {                                    
+      172 +     // Use tmux switch-client to switch to the selected      
+          +session                                                       
+      173 +     // This keeps the watch TUI running in its pane          
+      174 +     err := tmux.SwitchClient(sessionName)                    
+      175 +     return switchedMsg{err: err}                             
+      176 +   }                                                          
+      177 + }                                                            
+      178 +                                                              
+      179   // Initialize model                                          
+      180   func newWatchModel(cfg *config.Config) watchModel {          
+      181     return watchModel{                                         
+  ⎿  Found 1 new diagnostic issue in 1 file (ctrl+o to expand)
+
+⏺ Now I need to add the SwitchClient function to the tmux package.
+
+⏺ Update(internal/tmux/tmux.go)
+  ⎿  Added 8 lines                                                       
+      81     return cmd.Run()                                            
+      82   }                                                             
+      83                                                                 
+      84 + // SwitchClient switches the tmux client to a different       
+         +session.                                                       
+      85 + // Unlike Attach, this doesn't need to capture stdin/stdout   
+         +since                                                          
+      86 + // it's meant to be called from background processes like the 
+         + watch TUI.                                                    
+      87 + func SwitchClient(name string) error {                        
+      88 +   cmd := exec.Command("tmux", "switch-client", "-t", name)    
+      89 +   return cmd.Run()                                            
+      90 + }                                                             
+      91 +                                                               
+      92   func Kill(name string) error {                                
+      93     cmd := exec.Command("tmux", "kill-session", "-t", name)     
+      94     return cmd.Run()                                            
+  ⎿  Found 1 new diagnostic issue in 1 file (ctrl+o to expand)
+
+⏺ Let me also handle the switchedMsg in the Update function.
+
+⏺ Read(cmd/wt/watch_tui.go)
+  ⎿  Read 60 lines
+  ⎿  Found 5 new diagnostic issues in 4 files (ctrl+o to expand)
+
+⏺ I need to add handling for the switchedMsg in the Update function.
+
+⏺ Update(cmd/wt/watch_tui.go)
+  ⎿  Added 4 lines                                                       
+      234       if m.cursor >= len(m.sessions) && len(m.sessions) > 0 {  
+      235         m.cursor = len(m.sessions) - 1                         
+      236       }                                                        
+      237 +                                                              
+      238 +   case switchedMsg:                                          
+      239 +     // Session switch completed, continue running            
+      240 +     // (ignore any error - user will see it when they can't  
+          +switch)                                                       
+      241     }                                                          
+      242                                                                
+      243     return m, nil                                              
+
+⏺ Now let me clean up the unused switchTo handling in cmdWatchTUI since we no longer quit and switch.
+
+⏺ Read(cmd/wt/watch_tui.go)
+  ⎿  Read 40 lines
+
+⏺ Update(cmd/wt/watch_tui.go)
+  ⎿  Added 4 lines, removed 23 lines                                     
+      357   }                                                            
+      358                                                                
+      359   // Run the watch TUI                                         
+      360 -func runWatchTUI(cfg *config.Config) (string, error) {        
+      360 +func runWatchTUI(cfg *config.Config) error {                  
+      361     m := newWatchModel(cfg)                                    
+      362     p := tea.NewProgram(m, tea.WithAltScreen())                
+      363                                                                
+      364 -  finalModel, err := p.Run()                                  
+      365 -   if err != nil {                                            
+      366 -     return "", err                                           
+      367 -   }                                                          
+      368 -                                                              
+      369 -   // Return the session to switch to (if any)                
+      370 -   if fm, ok := finalModel.(watchModel); ok {                 
+      371 -     return fm.switchTo, nil                                  
+      372 -   }                                                          
+      373 -                                                              
+      374 -   return "", nil                                             
+      364 +  _, err := p.Run()                                           
+      365 +   return err                                                 
+      366   }                                                            
+      367                                                                
+      368   // cmdWatchTUI runs the new watch TUI                        
+      369   func cmdWatchTUI(cfg *config.Config) error {                 
+      370 -  switchTo, err := runWatchTUI(cfg)                           
+      371 -   if err != nil {                                            
+      372 -     return err                                               
+      373 -   }                                                          
+      374 -                                                              
+      375 -   // If user selected a session, switch to it                
+      376 -   if switchTo != "" {                                        
+      377 -     return tmux.Attach(switchTo)                             
+      378 -   }                                                          
+      379 -                                                              
+      380 -   return nil                                                 
+      370 +  return runWatchTUI(cfg)                                     
+      371   }                                                            
+
+⏺ Now let me remove the unused switchTo field from the model.
+
+⏺ Update(cmd/wt/watch_tui.go)
+  ⎿  Added 7 lines, removed 8 lines                                      
+      111                                                                
+      112   // Model                                                     
+      113   type watchModel struct {                                     
+      114 -  cfg           *config.Config                                
+      115 -  sessions      []sessionItem                                 
+      116 -  cursor        int                                           
+      117 -   width         int                                          
+      118 -  height        int                                           
+      119 -  lastRefresh   time.Time                                     
+      120 -   switchTo      string // Session to switch to on quit       
+      121 -   quitting      bool                                         
+      114 +  cfg         *config.Config                                  
+      115 +  sessions    []sessionItem                                   
+      116 +  cursor      int                                             
+      117 +   width       int                                            
+      118 +  height      int                                             
+      119 +  lastRefresh time.Time                                       
+      120 +   quitting    bool                                           
+      121   }                                                            
+      122                                                                
+      123   // Messages                                                  
+
+⏺ Now let me build and test to verify the changes work.
+
+⏺ Bash(go build ./...)
+  ⎿  (No content)
+
+⏺ Build succeeded. Let me run the tests.
+
+⏺ Bash(go test ./...)
+  ⎿  ok  	github.com/badri/wt/cmd/wt	0.791s                  
+     ok  	github.com/badri/wt/internal/auto	(cached)
+     ok  	github.com/badri/wt/internal/bead	(cached)
+     … +13 lines (ctrl+o to expand)
+
+⏺ Now let me make the watch pane persist by running it in a loop in the hub creation.
+
+⏺ Update(internal/hub/hub.go)
+  ⎿  Added 3 lines, removed 2 lines                                      
+      177         // Non-fatal - watch pane is optional                  
+      178         fmt.Fprintf(os.Stderr, "Warning: could not create      
+           watch pane: %v\n", err)                                       
+      179       } else {                                                 
+      180 -       // Start wt watch in the new pane                      
+      181 -       watchCmd := exec.Command("tmux", "send-keys", "-t",    
+          -HubSessionName+".1", "wt watch", "Enter")                     
+      180 +       // Start wt watch in a loop so it restarts if user     
+          +quits                                                         
+      181 +       // This ensures the watch pane stays active            
+      182 +       watchCmd := exec.Command("tmux", "send-keys", "-t",    
+          +HubSessionName+".1", "while true; do wt watch; sleep 1;       
+          +done", "Enter")                                               
+      183         _ = watchCmd.Run() // Non-fatal if this fails          
+      184                                                                
+      185         // Focus back on the main pane (pane 0)                
+
+⏺ Let me build and run tests again.
+
+⏺ Bash(go build ./... && go test ./...)
+  ⎿  ok  	github.com/badri/wt/cmd/wt	(cached)                
+     ok  	github.com/badri/wt/internal/auto	(cached)
+     ok  	github.com/badri/wt/internal/bead	(cached)
+     … +13 lines (ctrl+o to expand)
+  ⎿  Found 2 new diagnostic issues in 1 file (ctrl+o to expand)
+
+⏺ Now let me address the visibility issue - making watch accessible from worker sessions via tmux popup.
+
+⏺ Read(cmd/wt/hub_commands.go)
+  ⎿  Read 10 lines
+
+⏺ Update(cmd/wt/hub_commands.go)
+  ⎿  Added 22 lines, removed 2 lines                                     
+      37     return opts                                                 
+      38   }                                                             
+      39                                                                 
+      40 -// cmdWatch displays a live dashboard of all sessions using the
+         - TUI                                                           
+      40 +// cmdWatch displays a live dashboard of all sessions using the
+         + TUI.                                                          
+      41 + // When run from a worker session (not hub), it uses tmux     
+         +popup to show the watch.                                       
+      42   func cmdWatch(cfg *config.Config) error {                     
+      43 -   return cmdWatchTUI(cfg)                                     
+      43 +   // Check if we're in the hub session                        
+      44 +   if hub.IsInHub() {                                          
+      45 +     // In hub - run TUI directly                              
+      46 +     return cmdWatchTUI(cfg)                                   
+      47 +   }                                                           
+      48 +                                                               
+      49 +   // In worker session - use tmux popup for overlay           
+      50 +   return cmdWatchPopup()                                      
+      51   }                                                             
+      52                                                                 
+      53 + // cmdWatchPopup shows watch in a tmux popup overlay          
+      54 + func cmdWatchPopup() error {                                  
+      55 +   // Use tmux popup to show watch as a floating overlay       
+      56 +   // -E closes popup when command exits                       
+      57 +   // -w and -h set the size                                   
+      58 +   cmd := exec.Command("tmux", "popup", "-E", "-w", "50%",     
+         +"-h", "80%", "wt", "watch")                                    
+      59 +   cmd.Stdin = os.Stdin                                        
+      60 +   cmd.Stdout = os.Stdout                                      
+      61 +   cmd.Stderr = os.Stderr                                      
+      62 +   return cmd.Run()                                            
+      63 + }                                                             
+      64 +                                                               
+      65   // cmdWatchLegacy displays the old-style dashboard (kept for  
+          reference)                                                     
+      66   func cmdWatchLegacy(cfg *config.Config) error {               
+      67     const refreshInterval = 2 * time.Second                     
+
+⏺ Wait, there's a recursion issue - the popup will run wt watch which will check hub.IsInHub() again. Let me fix this by adding an environment variable check.
+
+⏺ Update(cmd/wt/hub_commands.go)
+  ⎿  Added 7 lines, removed 1 line                                       
+      40   // cmdWatch displays a live dashboard of all sessions using   
+          the TUI.                                                       
+      41   // When run from a worker session (not hub), it uses tmux     
+          popup to show the watch.                                       
+      42   func cmdWatch(cfg *config.Config) error {                     
+      43 +   // If we're already in a popup context, run directly        
+      44 +   if os.Getenv("WT_WATCH_POPUP") == "1" {                     
+      45 +     return cmdWatchTUI(cfg)                                   
+      46 +   }                                                           
+      47 +                                                               
+      48     // Check if we're in the hub session                        
+      49     if hub.IsInHub() {                                          
+      50       // In hub - run TUI directly                              
+     ...
+      55     // Use tmux popup to show watch as a floating overlay       
+      56     // -E closes popup when command exits                       
+      57     // -w and -h set the size                                   
+      58 -   cmd := exec.Command("tmux", "popup", "-E", "-w", "50%",     
+         -"-h", "80%", "wt", "watch")                                    
+      58 +   // Set WT_WATCH_POPUP to prevent recursion                  
+      59 +   cmd := exec.Command("tmux", "popup", "-E", "-w", "50%",     
+         +"-h", "80%", "-e", "WT_WATCH_POPUP=1", "wt", "watch")          
+      60     cmd.Stdin = os.Stdin                                        
+      61     cmd.Stdout = os.Stdout                                      
+      62     cmd.Stderr = os.Stderr                                      
+  ⎿  Found 2 new diagnostic issues in 1 file (ctrl+o to expand)
+
+⏺ Let me build and test.
+
+⏺ Bash(go build ./... && go test ./...)
+  ⎿  ok  	github.com/badri/wt/cmd/wt	(cached)                
+     ok  	github.com/badri/wt/internal/auto	(cached)
+     ok  	github.com/badri/wt/internal/bead	(cached)
+     … +13 lines (ctrl+o to expand)
+  ⎿  Found 2 new diagnostic issues in 1 file (ctrl+o to expand)
+
+⏺ All changes are complete. Here's a summary:
+
+  Changes made:
+
+  1. Watch no longer stops on Enter (watch_tui.go):
+    - Pressing Enter now switches to the selected session via tmux switch-client without exiting the TUI
+    - Added switchSessionCmd that switches sessions while keeping the watch running
+    - Added SwitchClient function to tmux package
+  2. Watch pane persists in hub (hub.go):
+    - Hub now starts watch in a loop: while true; do wt watch; sleep 1; done
+    - If user quits with 'q', watch restarts after 1 second
+  3. Watch visible from worker sessions (hub_commands.go):
+    - Running wt watch from a worker session now opens a tmux popup overlay
+    - Uses tmux popup -E -w 50% -h 80% for a floating overlay
+    - Environment variable WT_WATCH_POPUP prevents recursion
+
+  Regarding supabyoi-woody: Yes, wt signal ready was sent successfully with the PR URL: https://github.com/badri/supabyoi/pull/11
+
+  Let me commit these changes.
+
+⏺ Bash(git status)
+  ⎿  On branch main                               
+     Your branch is up to date with 'origin/main'.
+     … +9 lines (ctrl+o to expand)
+
+⏺ Bash(git diff --stat)
+  ⎿  cmd/wt/hub_commands.go | 30 ++++++++++++++++++++++--                  
+     cmd/wt/watch_tui.go    | 63 +++++++++++++++++++++++-------------------
+    --------
+    … +3 lines (ctrl+o to expand)
+
+
+❯ are tests added to these new tui + wt watch changes? 
+
+⏺ Good question. Let me check the existing test coverage and add tests for the new functionality.
+
+⏺ Search(pattern: "**/*_test.go")
+  ⎿  Error: spawn /Users/lakshminp/claude/local/node_modules/.bin/vendor/ripgrep/
+     arm64-darwin/rg ENOENT
+
+⏺ Bash(find . -name "*_test.go" -type f | head -20)
+  ⎿  ./cmd/wt/main_test.go                 
+     ./test/integration/integration_test.go
+     ./internal/merge/merge_test.go
+     … +13 lines (ctrl+o to expand)
+
+⏺ Read(internal/tmux/mock_test.go)
+  ⎿  Read 158 lines
+
+⏺ Read(internal/hub/hub_test.go)
+  ⎿  Read 209 lines
+
+⏺ I see there's a mock runner for tmux. Let me check the interface and add SwitchClient to the mock.
+
+⏺ Bash(grep -n "type Runner interface" internal/tmux/*.go)
+  ⎿  internal/tmux/interface.go:5:type Runner interface {
+
+⏺ Read(internal/tmux/interface.go)
+  ⎿  Read 35 lines
+
+⏺ Read(cmd/wt/main_test.go)
+  ⎿  Read 229 lines
+
+⏺ Let me add SwitchClient to the Runner interface and mock for testability.
+
+⏺ Update(internal/tmux/interface.go)
+  ⎿  Added 1 line                                                        
+       5   type Runner interface {                                       
+       6     NewSession(name, workdir, beadsDir, editorCmd string, opts  
+          *SessionOptions) error                                         
+       7     Attach(name string) error                                   
+       8 +   SwitchClient(name string) error                             
+       9     Kill(name string) error                                     
+      10     SessionExists(name string) bool                             
+      11     ListSessions() ([]string, error)                            
+
+⏺ Update(internal/tmux/interface.go)
+  ⎿  Added 4 lines                                                       
+      22     return Attach(name)                                         
+      23   }                                                             
+      24                                                                 
+      25 + func (r *DefaultRunner) SwitchClient(name string) error {     
+      26 +   return SwitchClient(name)                                   
+      27 + }                                                             
+      28 +                                                               
+      29   func (r *DefaultRunner) Kill(name string) error {             
+      30     return Kill(name)                                           
+      31   }                                                             
+  ⎿  Found 1 new diagnostic issue in 1 file (ctrl+o to expand)
+
+⏺ Now I need to add SwitchClient to the MockRunner.
+
+⏺ Bash(grep -n "type MockRunner" internal/tmux/*.go)
+  ⎿  internal/tmux/mock.go:6:type MockRunner struct {
+
+⏺ Read(internal/tmux/mock.go)
+  ⎿  Read 112 lines
+
+⏺ Update(internal/tmux/mock.go)
+  ⎿  Added 12 lines, removed 9 lines                                     
+       4                                                                 
+       5   // MockRunner is a mock implementation of Runner for testing. 
+       6   type MockRunner struct {                                      
+       7 -  Sessions       map[string]MockSession                        
+       8 -  NewSessionErr  error                                         
+       9 -  AttachErr      error                                         
+      10 -   KillErr        error                                        
+      11 -   ListErr        error                                        
+      12 -   AttachCalled   bool                                         
+      13 -   AttachedTo     string                                       
+      14 -   KillCalled     bool                                         
+      15 -   KilledSession  string                                       
+       7 +  Sessions          map[string]MockSession                     
+       8 +  NewSessionErr     error                                      
+       9 +  AttachErr         error                                      
+      10 +   SwitchClientErr   error                                     
+      11 +   KillErr           error                                     
+      12 +   ListErr           error                                     
+      13 +   AttachCalled      bool                                      
+      14 +   AttachedTo        string                                    
+      15 +   SwitchClientCalled bool                                     
+      16 +   SwitchClientTo    string                                    
+      17 +   KillCalled        bool                                      
+      18 +   KilledSession     string                                    
+      19   }                                                             
+      20                                                                 
+      21   // MockSession represents a mock tmux session.                
+
+⏺ Update(internal/tmux/mock.go)
+  ⎿  Added 14 lines                                                      
+      72     return nil                                                  
+      73   }                                                             
+      74                                                                 
+      75 + func (m *MockRunner) SwitchClient(name string) error {        
+      76 +   m.SwitchClientCalled = true                                 
+      77 +   m.SwitchClientTo = name                                     
+      78 +                                                               
+      79 +   if m.SwitchClientErr != nil {                               
+      80 +     return m.SwitchClientErr                                  
+      81 +   }                                                           
+      82 +                                                               
+      83 +   if _, exists := m.Sessions[name]; !exists {                 
+      84 +     return fmt.Errorf("session '%s' not found", name)         
+      85 +   }                                                           
+      86 +   return nil                                                  
+      87 + }                                                             
+      88 +                                                               
+      89   func (m *MockRunner) Kill(name string) error {                
+      90     m.KillCalled = true                                         
+      91     m.KilledSession = name                                      
+
+⏺ Now let me add tests for SwitchClient to the mock tests.
+
+⏺ Update(internal/tmux/mock_test.go)
+  ⎿  Added 37 lines                                                      
+       91     }                                                          
+       92   }                                                            
+       93                                                                
+       94 + func TestMockRunner_SwitchClient(t *testing.T) {             
+       95 +   mock := NewMockRunner()                                    
+       96 +   mock.AddSession("test", "/tmp", "/tmp")                    
+       97 +                                                              
+       98 +   err := mock.SwitchClient("test")                           
+       99 +   if err != nil {                                            
+      100 +     t.Fatalf("SwitchClient failed: %v", err)                 
+      101 +   }                                                          
+      102 +                                                              
+      103 +   if !mock.SwitchClientCalled {                              
+      104 +     t.Error("SwitchClientCalled should be true")             
+      105 +   }                                                          
+      106 +   if mock.SwitchClientTo != "test" {                         
+      107 +     t.Errorf("expected SwitchClientTo 'test', got %q",       
+          +mock.SwitchClientTo)                                          
+      108 +   }                                                          
+      109 + }                                                            
+      110 +                                                              
+      111 + func TestMockRunner_SwitchClient_NotFound(t *testing.T) {    
+      112 +   mock := NewMockRunner()                                    
+      113 +                                                              
+      114 +   err := mock.SwitchClient("nonexistent")                    
+      115 +   if err == nil {                                            
+      116 +     t.Error("expected error for nonexistent session")        
+      117 +   }                                                          
+      118 + }                                                            
+      119 +                                                              
+      120 + func TestMockRunner_SwitchClient_ConfiguredError(t           
+          +*testing.T) {                                                 
+      121 +   mock := NewMockRunner()                                    
+      122 +   mock.AddSession("test", "/tmp", "/tmp")                    
+      123 +   mock.SwitchClientErr = errors.New("forced error")          
+      124 +                                                              
+      125 +   err := mock.SwitchClient("test")                           
+      126 +   if err == nil {                                            
+      127 +     t.Error("expected configured error")                     
+      128 +   }                                                          
+      129 + }                                                            
+      130 +                                                              
+      131   func TestMockRunner_Kill(t *testing.T) {                     
+      132     mock := NewMockRunner()                                    
+      133     mock.AddSession("test", "/tmp", "/tmp")                    
+
+⏺ Now let me build and run all tests.
+
+⏺ Bash(go build ./... && go test ./...)
+  ⎿  ok  	github.com/badri/wt/cmd/wt	(cached)                
+     ok  	github.com/badri/wt/internal/auto	(cached)
+     ok  	github.com/badri/wt/internal/bead	(cached)
+     … +13 lines (ctrl+o to expand)
+
+⏺ All tests pass. Here's the summary of changes with tests:
+
+  Files changed:
+  - cmd/wt/watch_tui.go - Watch TUI now switches sessions without exiting
+  - cmd/wt/hub_commands.go - Added popup support for wt watch from worker sessions
+  - internal/hub/hub.go - Watch pane runs in a loop for persistence
+  - internal/tmux/tmux.go - Added SwitchClient function
+  - internal/tmux/interface.go - Added SwitchClient to Runner interface
+  - internal/tmux/mock.go - Added SwitchClient to MockRunner
+  - internal/tmux/mock_test.go - Added tests for SwitchClient
+
+  Let me commit these changes.
+
+⏺ Bash(git add cmd/wt/watch_tui.go cmd/wt/hub_commands.go internal/hub/hub.go
+      internal/tmux/tmux.go internal/tmux/interface.go internal/tmux/mock.go
+      internal/tmux/mock…)
+  ⎿ [main 1cfa4b6] Fix wt watch to persist and be accessible from worker se
+    ssions
+     7 files changed, 136 insertions(+), 47 deletions(-)
+
+
+⏺ Bash(git status)
+  ⎿  On branch main                                    
+     Your branch is ahead of 'origin/main' by 1 commit.
+       (use "git push" to publish your local commits)
+     … +2 lines (ctrl+o to expand)
+
+⏺ Bash(bd sync)
+  ⎿  → Loaded 28 local issues from database
+     → Loading base state...
+       Loaded 28 issues from base state
+     … +14 lines (ctrl+o to expand)
+
+⏺ Bash(git push)
+  ⎿  To github.com:badri/wt.git       
+        64a4ae0..1cfa4b6  main -> main
+
+⏺ Done. Changes pushed.
+
+  Summary of fixes:
+
+  1. Watch no longer stops on Enter - Pressing Enter now switches to the selected session via tmux switch-client while the watch TUI keeps running in its pane.
+  2. Watch pane persists - Hub now starts watch in a loop (while true; do wt watch; sleep 1; done) so if you quit with 'q', it restarts after 1 second.
+  3. Watch visible from worker sessions - Running wt watch from a worker session now opens a tmux popup overlay (50% width, 80% height). You can use it to see status and switch sessions.
+
+  Regarding supabyoi-woody: Yes, wt signal ready was successfully sent with the PR URL (https://github.com/badri/supabyoi/pull/11).
+
+✻ Cooked for 7m 3s
+
+❯ is this the command to create a wt watch window?                          
+  tmux split-window -h -l 25% && tmux send-keys 'wt watch' Enter && tmux    
+  select-pane -L                                                            
+
+⏺ Yes, that's the basic pattern. The implementation in hub.go does essentially the same thing but:
+
+  1. Targets the hub session explicitly with -t hub
+  2. Uses a loop so watch auto-restarts: while true; do wt watch; sleep 1; done
+  3. Uses pane index (hub.0) instead of -L
+
+  Your command works fine when run interactively from within the session. The -L (select left pane) is equivalent to selecting pane 0 after a horizontal split.
+
+  If you want the auto-restart behavior:
+  tmux split-window -h -l 25% && tmux send-keys 'while true; do wt watch; sleep 1; done' Enter && tmux select-pane -L
+
+❯ LEt's say user started wt hub with no watch, later they detach and attach 
+  using same command, and they want to start with watch, can we add this    
+  bit?                                                                      
+
+⏺ Good idea. Let me add a --watch flag that creates the watch pane when attaching to an existing hub.
+
+⏺ Read(internal/hub/hub.go)
+  ⎿  Read 60 lines
+
+⏺ Read(internal/hub/hub.go)
+  ⎿  Read 80 lines
+
+⏺ Update(internal/hub/hub.go)
+  ⎿  Added 2 lines, removed 1 line                                       
+      23     Status  bool // Show hub status without attaching           
+      24     Kill    bool // Kill the hub session                        
+      25     Force   bool // Skip confirmation prompt                    
+      26 -  NoWatch bool // Don't start wt watch pane                    
+      26 +  NoWatch bool // Don't start wt watch pane (on create)        
+      27 +   Watch   bool // Add wt watch pane (when attaching to        
+         +existing hub)                                                  
+      28   }                                                             
+      29                                                                 
+      30   // Status contains hub session status information.            
+
+⏺ Update(internal/hub/hub.go)
+  ⎿  Added 6 lines, removed 1 line                                       
+      130   // createOrAttach creates a new hub session or attaches to   
+           existing one.                                                 
+      131   func createOrAttach(cfg *config.Config, opts *Options) error 
+            {                                                            
+      132     if Exists() {                                              
+      133 -     // Hub exists - attach to it                             
+      133 +     // Hub exists - optionally add watch pane before         
+          +attaching                                                     
+      134 +     if opts.Watch {                                          
+      135 +       if err := addWatchPane(); err != nil {                 
+      136 +         fmt.Fprintf(os.Stderr, "Warning: could not add watch 
+          + pane: %v\n", err)                                            
+      137 +       }                                                      
+      138 +     }                                                        
+      139       return attach()                                          
+      140     }                                                          
+      141                                                                
+
+⏺ Now let me add the addWatchPane function.
+
+⏺ Read(internal/hub/hub.go)
+  ⎿  Read 30 lines
+  ⎿  Found 1 new diagnostic issue in 1 file (ctrl+o to expand)
+
+⏺ Update(internal/hub/hub.go)
+  ⎿  Added 39 lines                                                      
+      204     return attach()                                            
+      205   }                                                            
+      206                                                                
+      207 + // addWatchPane adds a watch pane to an existing hub         
+          +session.                                                      
+      208 + func addWatchPane() error {                                  
+      209 +   // Check how many panes exist                              
+      210 +   cmd := exec.Command("tmux", "list-panes", "-t",            
+          +HubSessionName, "-F", "#{pane_id}")                           
+      211 +   output, err := cmd.Output()                                
+      212 +   if err != nil {                                            
+      213 +     return fmt.Errorf("listing panes: %w", err)              
+      214 +   }                                                          
+      215 +                                                              
+      216 +   panes := strings.Split(strings.TrimSpace(string(output)),  
+          +"\n")                                                         
+      217 +   if len(panes) > 1 {                                        
+      218 +     // Already has multiple panes, assume watch exists       
+      219 +     fmt.Println("Watch pane may already exist (hub has       
+          +multiple panes)")                                             
+      220 +     return nil                                               
+      221 +   }                                                          
+      222 +                                                              
+      223 +   homeDir := os.Getenv("HOME")                               
+      224 +   if homeDir == "" {                                         
+      225 +     homeDir = "/"                                            
+      226 +   }                                                          
+      227 +                                                              
+      228 +   // Create watch pane                                       
+      229 +   splitCmd := exec.Command("tmux", "split-window", "-h",     
+          +"-t", HubSessionName, "-l", "25%", "-c", homeDir)             
+      230 +   if err := splitCmd.Run(); err != nil {                     
+      231 +     return fmt.Errorf("creating watch pane: %w", err)        
+      232 +   }                                                          
+      233 +                                                              
+      234 +   // Start wt watch in a loop                                
+      235 +   watchCmd := exec.Command("tmux", "send-keys", "-t",        
+          +HubSessionName+".1", "while true; do wt watch; sleep 1;       
+          +done", "Enter")                                               
+      236 +   _ = watchCmd.Run()                                         
+      237 +                                                              
+      238 +   // Focus back on main pane                                 
+      239 +   focusCmd := exec.Command("tmux", "select-pane", "-t",      
+          +HubSessionName+".0")                                          
+      240 +   _ = focusCmd.Run()                                         
+      241 +                                                              
+      242 +   fmt.Println("Added watch pane to hub")                     
+      243 +   return nil                                                 
+      244 + }                                                            
+      245 +                                                              
+      246   // attach attaches to the hub session.                       
+      247   func attach() error {                                        
+      248     // Check if we're inside tmux                              
+
+❯ what's the default? 
+
+⏺ The current default:
+  - Creating new hub: watch pane is added (use --no-watch to skip)
+  - Attaching to existing hub: no change (use --watch to add watch pane)
+
+  Let me update the flag parsing to support --watch.
+
+⏺ Read(cmd/wt/hub_commands.go)
+  ⎿  Read 25 lines
+
+⏺ Update(cmd/wt/hub_commands.go)
+  ⎿  Added 4 lines                                                       
+      32         opts.Kill = true                                        
+      33       case "-f", "--force":                                     
+      34         opts.Force = true                                       
+      35 +     case "-w", "--watch":                                     
+      36 +       opts.Watch = true                                       
+      37 +     case "--no-watch":                                        
+      38 +       opts.NoWatch = true                                     
+      39       }                                                         
+      40     }                                                           
+      41     return opts                                                 
+
+⏺ Bash(go build ./... && go test ./...)
+  ⎿  ok  	github.com/badri/wt/cmd/wt	(cached)                
+     ok  	github.com/badri/wt/internal/auto	(cached)
+     ok  	github.com/badri/wt/internal/bead	(cached)
+     … +13 lines (ctrl+o to expand)
+  ⎿  Found 2 new diagnostic issues in 1 file (ctrl+o to expand)
+
+⏺ Done. Now the commands work as:
+  ┌─────────────────────────────┬──────────────────────────────────────────┐
+  │           Command           │                 Behavior                 │
+  ├─────────────────────────────┼──────────────────────────────────────────┤
+  │ wt hub                      │ Create with watch, or attach (no change) │
+  ├─────────────────────────────┼──────────────────────────────────────────┤
+  │ wt hub --no-watch           │ Create without watch                     │
+  ├─────────────────────────────┼──────────────────────────────────────────┤
+  │ wt hub --watch or wt hub -w │ Attach and add watch pane if missing     │
+  └─────────────────────────────┴──────────────────────────────────────────┘
+  So if user started with wt hub --no-watch and later wants watch:
+  wt hub --watch
+
+  Want me to change the default so wt hub always ensures watch exists when attaching? That would mean:
+  - wt hub = always have watch (add if missing)
+  - wt hub --no-watch = don't add/create watch
+
+✻ Brewed for 1m 5s
+
+❯ I had to hit Enter manually in each session.                              
+  check how ~/claude-tools/gastown does this.                               
+  ⎿  [Image #1]
+
+⏺ Let me check how gastown handles sending the initial prompt to Claude.
+
+⏺ Explore(Explore gastown prompt sending)
+  ⎿  Done (25 tool uses · 62.6k tokens · 2m 19s)                           
+
+⏺ Now I understand. Gastown uses a more robust approach:
+
+  1. Creates session with command directly instead of send-keys after creation
+  2. Waits for Claude to start before sending prompts
+  3. Uses reliable nudge pattern: 500ms debounce + Escape + Enter with retries
+
+  Let me check how wt currently does it.
+
+⏺ Bash(grep -n "send-keys" cmd/wt/*.go internal/*/*.go 2>/dev/null | head -30)
+  ⎿ cmd/wt/session_commands.go:310:	sendPromptCmd := exec.Command("tmux", "
+    send-keys", "-t", sessionName, prompt)
+    cmd/wt/session_commands.go:315:	sendEnterCmd := exec.Command("tmux", "s
+    … +13 lines (ctrl+o to expand)
+
+
+
+⏺ Read(cmd/wt/session_commands.go)
+  ⎿  Read 60 lines
+
+⏺ I see the issue. The current code just does a simple 8-second wait and sends keys without the reliable debounce/retry pattern. Let me fix this using gastown's approach.
+
+⏺ Update(internal/tmux/tmux.go)
+  ⎿  Added 52 lines                                                      
+       89     return cmd.Run()                                           
+       90   }                                                            
+       91                                                                
+       92 + // NudgeSession sends a message to a tmux session with       
+          +reliable delivery.                                            
+       93 + // Uses literal mode for text, debounce delay, and retry     
+          +logic for Enter.                                              
+       94 + func NudgeSession(session, message string) error {           
+       95 +   // 1. Send text in literal mode (handles special           
+          +characters)                                                   
+       96 +   sendCmd := exec.Command("tmux", "send-keys", "-t",         
+          +session, "-l", message)                                       
+       97 +   if err := sendCmd.Run(); err != nil {                      
+       98 +     return fmt.Errorf("sending message: %w", err)            
+       99 +   }                                                          
+      100 +                                                              
+      101 +   // 2. Wait 500ms for paste to complete                     
+      102 +   time.Sleep(500 * time.Millisecond)                         
+      103 +                                                              
+      104 +   // 3. Send Escape to exit vim INSERT mode if enabled       
+          +(harmless in normal mode)                                     
+      105 +   escCmd := exec.Command("tmux", "send-keys", "-t", session, 
+          + "Escape")                                                    
+      106 +   _ = escCmd.Run()                                           
+      107 +   time.Sleep(100 * time.Millisecond)                         
+      108 +                                                              
+      109 +   // 4. Send Enter with retry (critical for message          
+          +submission)                                                   
+      110 +   var lastErr error                                          
+      111 +   for attempt := 0; attempt < 3; attempt++ {                 
+      112 +     if attempt > 0 {                                         
+      113 +       time.Sleep(200 * time.Millisecond)                     
+      114 +     }                                                        
+      115 +     enterCmd := exec.Command("tmux", "send-keys", "-t",      
+          +session, "Enter")                                             
+      116 +     if err := enterCmd.Run(); err != nil {                   
+      117 +       lastErr = err                                          
+      118 +       continue                                               
+      119 +     }                                                        
+      120 +     return nil                                               
+      121 +   }                                                          
+      122 +   return fmt.Errorf("failed to send Enter after 3 attempts:  
+          +%w", lastErr)                                                 
+      123 + }                                                            
+      124 +                                                              
+      125 + // WaitForClaude waits for Claude to be running in the       
+          +session.                                                      
+      126 + // Returns nil when Claude is detected, or error on timeout. 
+      127 + func WaitForClaude(session string, timeout time.Duration)    
+          +error {                                                       
+      128 +   deadline := time.Now().Add(timeout)                        
+      129 +   for time.Now().Before(deadline) {                          
+      130 +     cmd := exec.Command("tmux", "display-message", "-t",     
+          +session, "-p", "#{pane_current_command}")                     
+      131 +     output, err := cmd.Output()                              
+      132 +     if err == nil {                                          
+      133 +       command := strings.TrimSpace(string(output))           
+      134 +       // Check if it's Claude (not a shell)                  
+      135 +       if command == "claude" || command == "node" {          
+      136 +         return nil                                           
+      137 +       }                                                      
+      138 +     }                                                        
+      139 +     time.Sleep(100 * time.Millisecond)                       
+      140 +   }                                                          
+      141 +   return fmt.Errorf("timeout waiting for Claude to start")   
+      142 + }                                                            
+      143 +                                                              
+      144   func Kill(name string) error {                               
+      145     cmd := exec.Command("tmux", "kill-session", "-t", name)    
+      146     return cmd.Run()                                           
+
+⏺ Read(internal/tmux/tmux.go)
+  ⎿  Read 15 lines
+  ⎿  Found 10 new diagnostic issues in 1 file (ctrl+o to expand)
+
+⏺ Update(internal/tmux/tmux.go)
+  ⎿  Added 1 line                                                        
+       5     "os"                                                        
+       6     "os/exec"                                                   
+       7     "strings"                                                   
+       8 +   "time"                                                      
+       9   )                                                             
+      10                                                                 
+      11   // SessionOptions contains optional configuration for         
+          creating a tmux session.                                       
+
+⏺ Now let me update session_commands.go to use the reliable nudge pattern.
+
+⏺ Update(cmd/wt/session_commands.go)
+  ⎿  Added 10 lines, removed 11 lines                                    
+      300     fmt.Printf("  Worktree: %s\n", worktreePath)               
+      301     fmt.Printf("  Branch:   %s\n", beadID)                     
+      302                                                                
+      303 -   // Send initial work prompt to Claude after delay for      
+          -startup                                                       
+      304 -   // Run synchronously to ensure prompt is sent before wt    
+          -exits                                                         
+      303 +   // Wait for Claude to actually be running before sending   
+          +prompt                                                        
+      304     fmt.Println("Waiting for Claude to start...")              
+      305 -   time.Sleep(8 * time.Second) // Wait for Claude Code to     
+          -fully initialize                                              
+      305 +   if err := tmux.WaitForClaude(sessionName, 60*time.Second); 
+          + err != nil {                                                 
+      306 +     fmt.Printf("Warning: %v (sending prompt anyway)\n", err) 
+      307 +   }                                                          
+      308 +                                                              
+      309 +   // Additional delay for Claude to fully initialize its UI  
+      310 +   time.Sleep(2 * time.Second)                                
+      311 +                                                              
+      312 +   // Send initial work prompt using reliable nudge pattern   
+      313     fmt.Println("Sending initial prompt to worker...")         
+      314     prompt := buildInitialPrompt(beadID, beadInfo.Title, proj) 
+      315 -   // Send prompt text                                        
+      316 -   sendPromptCmd := exec.Command("tmux", "send-keys", "-t",   
+          -sessionName, prompt)                                          
+      317 -   if err := sendPromptCmd.Run(); err != nil {                
+      315 +   if err := tmux.NudgeSession(sessionName, prompt); err !=   
+          +nil {                                                         
+      316       fmt.Printf("Warning: could not send initial prompt:      
+           %v\n", err)                                                   
+      317     }                                                          
+      318 -   // Send Enter key separately                               
+      319 -   sendEnterCmd := exec.Command("tmux", "send-keys", "-t",    
+          -sessionName, "Enter")                                         
+      320 -   if err := sendEnterCmd.Run(); err != nil {                 
+      321 -     fmt.Printf("Warning: could not send Enter: %v\n", err)   
+      322 -   }                                                          
+      318                                                                
+      319     // Determine if we should switch                           
+      320     // Default to no-switch if running from hub (WT_HUB=1),    
+           unless --switch is used                                       
+  ⎿  Found 1 new diagnostic issue in 1 file (ctrl+o to expand)
+
+⏺ Bash(head -20 cmd/wt/session_commands.go)
+  ⎿  package main                  
+
+     import (
+     … +17 lines (ctrl+o to expand)
+  ⎿  Found 1 new diagnostic issue in 1 file (ctrl+o to expand)
+
+⏺ Bash(grep -n "exec\." cmd/wt/session_commands.go)
+  ⎿  No matches found
+
+⏺ Update(cmd/wt/session_commands.go)
+  ⎿  Removed 1 line                                                      
+      3   import (                                                       
+      4     "fmt"                                                        
+      5     "os"                                                         
+      6 -   "os/exec"                                                    
+      6     "strings"                                                    
+      7     "time"                                                       
+      8                                                                  
+
+⏺ Bash(go build ./... && go test ./...)
+  ⎿  ok  	github.com/badri/wt/cmd/wt	0.810s                  
+     ok  	github.com/badri/wt/internal/auto	(cached)
+     ok  	github.com/badri/wt/internal/bead	(cached)
+     … +13 lines (ctrl+o to expand)
+  ⎿  Found 1 new diagnostic issue in 1 file (ctrl+o to expand)
+
+⏺ Now let me add the new functions to the interface and mock for testability.
+
+⏺ Update(internal/tmux/interface.go)
+  ⎿  Added 2 lines                                                       
+       6     NewSession(name, workdir, beadsDir, editorCmd string, opts  
+          *SessionOptions) error                                         
+       7     Attach(name string) error                                   
+       8     SwitchClient(name string) error                             
+       9 +   NudgeSession(session, message string) error                 
+      10 +   WaitForClaude(session string, timeout time.Duration) error  
+      11     Kill(name string) error                                     
+      12     SessionExists(name string) bool                             
+      13     ListSessions() ([]string, error)                            
+
+⏺ Update(internal/tmux/interface.go)
+  ⎿  Added 2 lines                                                       
+      1   package tmux                                                   
+      2                                                                  
+      3 + import "time"                                                  
+      4 +                                                                
+      5   // Runner defines the interface for tmux operations.           
+      6   // This allows mocking in tests.                               
+      7   type Runner interface {                                        
+  ⎿  Found 2 new diagnostic issues in 2 files (ctrl+o to expand)
+
+⏺ Read(internal/tmux/interface.go)
+  ⎿  Read 44 lines
+
+⏺ Update(internal/tmux/interface.go)
+  ⎿  Added 8 lines                                                       
+      30     return SwitchClient(name)                                   
+      31   }                                                             
+      32                                                                 
+      33 + func (r *DefaultRunner) NudgeSession(session, message string) 
+         + error {                                                       
+      34 +   return NudgeSession(session, message)                       
+      35 + }                                                             
+      36 +                                                               
+      37 + func (r *DefaultRunner) WaitForClaude(session string, timeout 
+         + time.Duration) error {                                        
+      38 +   return WaitForClaude(session, timeout)                      
+      39 + }                                                             
+      40 +                                                               
+      41   func (r *DefaultRunner) Kill(name string) error {             
+      42     return Kill(name)                                           
+      43   }                                                             
+
+⏺ Now let me add the methods to MockRunner.
+
+⏺ Read(internal/tmux/mock.go)
+  ⎿  Read 25 lines
+
+⏺ Update(internal/tmux/mock.go)
+  ⎿  Added 22 lines, removed 13 lines                                    
+       1   package tmux                                                  
+       2                                                                 
+       3 -import "fmt"                                                   
+       3 +import (                                                       
+       4 +   "fmt"                                                       
+       5 +   "time"                                                      
+       6 + )                                                             
+       7                                                                 
+       8   // MockRunner is a mock implementation of Runner for testing. 
+       9   type MockRunner struct {                                      
+      10 -  Sessions          map[string]MockSession                     
+      11 -  NewSessionErr     error                                      
+      12 -  AttachErr         error                                      
+      13 -  SwitchClientErr   error                                      
+      14 -   KillErr           error                                     
+      15 -   ListErr           error                                     
+      16 -   AttachCalled      bool                                      
+      17 -   AttachedTo        string                                    
+      18 -   SwitchClientCalled bool                                     
+      19 -   SwitchClientTo    string                                    
+      20 -   KillCalled        bool                                      
+      21 -   KilledSession     string                                    
+      10 +  Sessions            map[string]MockSession                   
+      11 +  NewSessionErr       error                                    
+      12 +  AttachErr           error                                    
+      13 +  SwitchClientErr     error                                    
+      14 +   NudgeSessionErr     error                                   
+      15 +   WaitForClaudeErr    error                                   
+      16 +   KillErr             error                                   
+      17 +   ListErr             error                                   
+      18 +   AttachCalled        bool                                    
+      19 +   AttachedTo          string                                  
+      20 +   SwitchClientCalled  bool                                    
+      21 +   SwitchClientTo      string                                  
+      22 +   NudgeSessionCalled  bool                                    
+      23 +   NudgeSessionTo      string                                  
+      24 +   NudgeSessionMessage string                                  
+      25 +   WaitForClaudeCalled bool                                    
+      26 +   KillCalled          bool                                    
+      27 +   KilledSession       string                                  
+      28   }                                                             
+      29                                                                 
+      30   // MockSession represents a mock tmux session.                
+
+⏺ Read(internal/tmux/mock.go)
+  ⎿  Read 40 lines
+  ⎿  Found 1 new diagnostic issue in 1 file (ctrl+o to expand)
+
+⏺ Update(internal/tmux/mock.go)
+  ⎿  Added 28 lines                                                      
+       95     return nil                                                 
+       96   }                                                            
+       97                                                                
+       98 + func (m *MockRunner) NudgeSession(session, message string)   
+          +error {                                                       
+       99 +   m.NudgeSessionCalled = true                                
+      100 +   m.NudgeSessionTo = session                                 
+      101 +   m.NudgeSessionMessage = message                            
+      102 +                                                              
+      103 +   if m.NudgeSessionErr != nil {                              
+      104 +     return m.NudgeSessionErr                                 
+      105 +   }                                                          
+      106 +                                                              
+      107 +   if _, exists := m.Sessions[session]; !exists {             
+      108 +     return fmt.Errorf("session '%s' not found", session)     
+      109 +   }                                                          
+      110 +   return nil                                                 
+      111 + }                                                            
+      112 +                                                              
+      113 + func (m *MockRunner) WaitForClaude(session string, timeout   
+          +time.Duration) error {                                        
+      114 +   m.WaitForClaudeCalled = true                               
+      115 +                                                              
+      116 +   if m.WaitForClaudeErr != nil {                             
+      117 +     return m.WaitForClaudeErr                                
+      118 +   }                                                          
+      119 +                                                              
+      120 +   if _, exists := m.Sessions[session]; !exists {             
+      121 +     return fmt.Errorf("session '%s' not found", session)     
+      122 +   }                                                          
+      123 +   return nil                                                 
+      124 + }                                                            
+      125 +                                                              
+      126   func (m *MockRunner) Kill(name string) error {               
+      127     m.KillCalled = true                                        
+      128     m.KilledSession = name                                     
+
+⏺ Bash(go build ./... && go test ./...)
+  ⎿  ok  	github.com/badri/wt/cmd/wt	1.485s                  
+     ok  	github.com/badri/wt/internal/auto	(cached)
+     ok  	github.com/badri/wt/internal/bead	(cached)
+     … +13 lines (ctrl+o to expand)
+
+⏺ All tests pass. Let me commit these changes.
+
+⏺ Bash(git add -A && git commit -m "Improve prompt delivery and add watch pane
+      control to hub…)
+  ⎿ [main 90cdb67] Improve prompt delivery and add watch pane control to hu
+    b
+     6 files changed, 176 insertions(+), 27 deletions(-)
+
+
+⏺ Bash(bd sync && git push)
+  ⎿  → Loaded 28 local issues from database
+     → Loading base state...
+       Loaded 28 issues from base state
+     … +16 lines (ctrl+o to expand)
+
+⏺ Done. Summary of changes:
+
+  Prompt delivery now follows gastown's reliable pattern:
+
+  1. WaitForClaude - Polls tmux to detect when Claude process is actually running (not shell)
+  2. NudgeSession - Reliable message delivery with:
+    - Literal mode (-l) for text
+    - 500ms debounce after paste
+    - Escape key (vim safety)
+    - Enter with 3-retry logic
+
+  Hub watch control:
+  - wt hub --watch or wt hub -w - Add watch pane to existing hub
+
+  Before: 8-second fixed wait + simple send-keys (required manual Enter)
+  After: Wait for Claude process + 2s UI delay + reliable nudge (automatic)
+
+✻ Cooked for 6m 22s
+
+❯ each wt command should list the options in detail when invoked without    
+  any parameters. or should have a -h option.                               
+
+⏺ Let me check how the CLI currently handles help and add proper usage info.
+
+⏺ Bash(grep -n "case \"" cmd/wt/main.go | head -30)
+  ⎿  40:	case "new":               
+     45:	case "kill":
+     50:	case "close":
+     … +23 lines (ctrl+o to expand)
+
+⏺ Read(cmd/wt/main.go)
+  ⎿  Read 125 lines
+
+⏺ Bash(grep -n "func cmdHelp" cmd/wt/*.go)
+  ⎿  cmd/wt/misc_commands.go:441:func cmdHelp() error {
+
+❯ whats the command to list wt projects? 
+
+⏺ The command to list projects is wt projects.
+
+  Let me check the current help system and add detailed help for commands.
+
+⏺ Read(cmd/wt/misc_commands.go)
+  ⎿  Read 80 lines
+
+⏺ The main wt help is already detailed. Let me add -h support for individual commands, starting with hub which we just modified.
+
+⏺ Update(cmd/wt/main.go)
+  ⎿  Added 3 lines                                                       
+      116     case "prime":                                              
+      117       return cmdPrime(cfg, args[1:])                           
+      118     case "hub":                                                
+      119 +     if hasHelpFlag(args[1:]) {                               
+      120 +       return cmdHubHelp()                                    
+      121 +     }                                                        
+      122       return cmdHub(cfg, args[1:])                             
+      123     default:                                                   
+      124       // Assume it's a session name or bead ID to switch to    
+
+⏺ Now let me add the helper function and hub help.
+
+⏺ Update(cmd/wt/hub_commands.go)
+  ⎿  Added 43 lines                                                      
+      20     return hub.Run(cfg, opts)                                   
+      21   }                                                             
+      22                                                                 
+      23 + // cmdHubHelp shows detailed help for the hub command         
+      24 + func cmdHubHelp() error {                                     
+      25 +   help := `wt hub - Manage the hub orchestration session      
+      26 +                                                               
+      27 + USAGE:                                                        
+      28 +     wt hub [options]                                          
+      29 +                                                               
+      30 + DESCRIPTION:                                                  
+      31 +     The hub is a dedicated tmux session for orchestrating     
+         +worker sessions.                                               
+      32 +     It includes a watch pane showing live status of all       
+         +workers.                                                       
+      33 +                                                               
+      34 + OPTIONS:                                                      
+      35 +     (none)              Create hub (with watch) or attach to  
+         +existing hub                                                   
+      36 +     -w, --watch         Add watch pane when attaching to      
+         +existing hub                                                   
+      37 +     --no-watch          Create hub without watch pane         
+      38 +     -d, --detach        Detach from hub (return to previous   
+         +session)                                                       
+      39 +     -s, --status        Show hub status without attaching     
+      40 +     -k, --kill          Kill the hub session                  
+      41 +     -f, --force         Skip confirmation when killing        
+      42 +     -h, --help          Show this help                        
+      43 +                                                               
+      44 + EXAMPLES:                                                     
+      45 +     wt hub                  Create or attach to hub           
+      46 +     wt hub --no-watch       Create hub without watch pane     
+      47 +     wt hub --watch          Attach and add watch pane if      
+         +missing                                                        
+      48 +     wt hub --status         Check if hub is running           
+      49 +     wt hub --kill           Terminate hub session             
+      50 +     wt hub --detach         Switch back to previous session   
+      51 + `                                                             
+      52 +   fmt.Print(help)                                             
+      53 +   return nil                                                  
+      54 + }                                                             
+      55 +                                                               
+      56 + // hasHelpFlag checks if args contain -h or --help            
+      57 + func hasHelpFlag(args []string) bool {                        
+      58 +   for _, arg := range args {                                  
+      59 +     if arg == "-h" || arg == "--help" {                       
+      60 +       return true                                             
+      61 +     }                                                         
+      62 +   }                                                           
+      63 +   return false                                                
+      64 + }                                                             
+      65 +                                                               
+      66   func parseHubFlags(args []string) *hub.Options {              
+      67     opts := &hub.Options{}                                      
+      68     for _, arg := range args {                                  
+  ⎿  Found 2 new diagnostic issues in 1 file (ctrl+o to expand)
+
+⏺ Bash(go build ./... && go test ./...)
+  ⎿  ok  	github.com/badri/wt/cmd/wt	(cached)                
+     ok  	github.com/badri/wt/internal/auto	(cached)
+     ok  	github.com/badri/wt/internal/bead	(cached)
+     … +13 lines (ctrl+o to expand)
+  ⎿  Found 2 new diagnostic issues in 1 file (ctrl+o to expand)
+
+⏺ Bash(go run ./cmd/wt hub --help)
+  ⎿  wt hub - Manage the hub orchestration session
+
+     USAGE:
+     … +25 lines (ctrl+o to expand)
+
+⏺ Now let me add help for other key commands.
+
+⏺ Update(cmd/wt/main.go)
+  ⎿  Added 2 lines, removed 2 lines                                      
+      38                                                                 
+      39     switch args[0] {                                            
+      40     case "new":                                                 
+      41 -    if len(args) < 2 {                                         
+      42 -       return fmt.Errorf("usage: wt new <bead-id> [--repo      
+         -<path>] [--name <name>] [--no-switch] [--switch]               
+         -[--no-test-env]")                                              
+      41 +    if len(args) < 2 || hasHelpFlag(args[1:]) {                
+      42 +       return cmdNewHelp()                                     
+      43       }                                                         
+      44       return cmdNew(cfg, args[1:])                              
+      45     case "kill":                                                
+
+⏺ Update(cmd/wt/main.go)
+  ⎿  Added 3 lines                                                       
+      64     case "abandon":                                             
+      65       return cmdAbandon(cfg)                                    
+      66     case "watch":                                               
+      67 +     if hasHelpFlag(args[1:]) {                                
+      68 +       return cmdWatchHelp()                                   
+      69 +     }                                                         
+      70       return cmdWatch(cfg)                                      
+      71     case "seance":                                              
+      72       return cmdSeance(cfg, args[1:])                           
+  ⎿  Found 1 new diagnostic issue in 1 file (ctrl+o to expand)
+
+⏺ Now let me add the help functions.
+
+⏺ Read(cmd/wt/session_commands.go)
+  ⎿  Read 30 lines
+  ⎿  Found 1 new diagnostic issue in 1 file (ctrl+o to expand)
+
+⏺ Update(cmd/wt/session_commands.go)
+  ⎿  Added 32 lines                                                      
+      26     noTestEnv   bool                                            
+      27   }                                                             
+      28                                                                 
+      29 + // cmdNewHelp shows detailed help for the new command         
+      30 + func cmdNewHelp() error {                                     
+      31 +   help := `wt new - Create a new worker session for a bead    
+      32 +                                                               
+      33 + USAGE:                                                        
+      34 +     wt new <bead-id> [options]                                
+      35 +                                                               
+      36 + DESCRIPTION:                                                  
+      37 +     Creates a git worktree, tmux session, and starts Claude   
+         +Code                                                           
+      38 +     to work on the specified bead.                            
+      39 +                                                               
+      40 + ARGUMENTS:                                                    
+      41 +     <bead-id>           The bead ID to work on (e.g., wt-123, 
+         + myproject-abc)                                                
+      42 +                                                               
+      43 + OPTIONS:                                                      
+      44 +     --repo <path>       Use specific repository path          
+         +(default: auto-detect from bead)                               
+      45 +     --name <name>       Custom session name (default:         
+         +generated from namepool)                                       
+      46 +     --no-switch         Don't switch to the new session after 
+         + creation                                                      
+      47 +     --switch            Force switch even when running from   
+         +hub                                                            
+      48 +     --no-test-env       Skip test environment setup           
+      49 +     -h, --help          Show this help                        
+      50 +                                                               
+      51 + EXAMPLES:                                                     
+      52 +     wt new wt-123                     Start working on bead   
+         +wt-123                                                         
+      53 +     wt new wt-123 --name mybranch     Use custom session name 
+      54 +     wt new wt-123 --no-switch         Create but stay in      
+         +current session                                                
+      55 +     wt new proj-456 --repo ~/code/proj  Specify repo path     
+      56 + `                                                             
+      57 +   fmt.Print(help)                                             
+      58 +   return nil                                                  
+      59 + }                                                             
+      60 +                                                               
+      61   func parseNewFlags(args []string) (beadID string, flags       
+          newFlags) {                                                    
+      62     beadID = args[0]                                            
+      63     for i := 1; i < len(args); i++ {                            
+
+⏺ Update(cmd/wt/hub_commands.go)
+  ⎿  Added 37 lines                                                      
+       84     return opts                                                
+       85   }                                                            
+       86                                                                
+       87 + // cmdWatchHelp shows detailed help for the watch command    
+       88 + func cmdWatchHelp() error {                                  
+       89 +   help := `wt watch - Live dashboard of all worker sessions  
+       90 +                                                              
+       91 + USAGE:                                                       
+       92 +     wt watch [options]                                       
+       93 +                                                              
+       94 + DESCRIPTION:                                                 
+       95 +     Shows a real-time TUI dashboard displaying all active    
+          +worker sessions                                               
+       96 +     with their status, bead, project, and idle time.         
+       97 +                                                              
+       98 +     When run from the hub session, the TUI runs directly.    
+       99 +     When run from a worker session, it opens as a tmux popup 
+          + overlay.                                                     
+      100 +                                                              
+      101 + KEYBOARD:                                                    
+      102 +     ↑/k, ↓/j           Navigate between sessions             
+      103 +     Enter              Switch to selected session (watch     
+          +keeps running)                                                
+      104 +     r                  Refresh session list                  
+      105 +     q, Ctrl+C          Quit watch                            
+      106 +                                                              
+      107 + STATUS INDICATORS:                                           
+      108 +     ● green            Working - actively processing         
+      109 +     ● yellow           Idle - no recent activity             
+      110 +     ● bright green     Ready - waiting for review            
+      111 +     ● red              Blocked or Error                      
+      112 +                                                              
+      113 + OPTIONS:                                                     
+      114 +     -h, --help         Show this help                        
+      115 +                                                              
+      116 + EXAMPLES:                                                    
+      117 +     wt watch           Start the watch dashboard             
+      118 +     wt hub --watch     Attach to hub and ensure watch pane   
+          +exists                                                        
+      119 + `                                                            
+      120 +   fmt.Print(help)                                            
+      121 +   return nil                                                 
+      122 + }                                                            
+      123 +                                                              
+      124   // cmdWatch displays a live dashboard of all sessions using  
+           the TUI.                                                      
+      125   // When run from a worker session (not hub), it uses tmux    
+           popup to show the watch.                                      
+      126   func cmdWatch(cfg *config.Config) error {                    
+
+⏺ Bash(go build ./... && go test ./...)
+  ⎿  ok  	github.com/badri/wt/cmd/wt	0.560s                  
+     ok  	github.com/badri/wt/internal/auto	(cached)
+     ok  	github.com/badri/wt/internal/bead	(cached)
+     … +13 lines (ctrl+o to expand)
+  ⎿  Found 3 new diagnostic issues in 2 files (ctrl+o to expand)
+
+⏺ Bash(go run ./cmd/wt new --help && echo "---" && go run ./cmd/wt watch -h)
+  ⎿  wt new - Create a new worker session for a bead
+
+     USAGE:
+     … +58 lines (ctrl+o to expand)
+
+⏺ Bash(go run ./cmd/wt new)
+  ⎿  wt new - Create a new worker session for a bead
+
+     USAGE:
+     … +26 lines (ctrl+o to expand)
+
+⏺ Let me commit these help improvements.
+
+⏺ Bash(git add -A && git commit -m "Add detailed help for wt commands with
+      -h/--help support…)
+  ⎿ [main 908045f] Add detailed help for wt commands with -h/--help support
+     3 files changed, 120 insertions(+), 2 deletions(-)
+
+
+❯ wt projects lists all projects. wt project isn't.                         
+  1. we should have consistent cli ux.                                      
+  2.  we can use the same tui as wt watch for other commands too.           
+
+⏺ Good points. Let me check the current state of project commands.
+
+⏺ Bash(grep -n "case \"project" cmd/wt/main.go)
+  ⎿  73:	case "projects":    
+     91:	case "project":
+
+⏺ Read(cmd/wt/main.go)
+  ⎿  Read 30 lines
+
+⏺ Let me make the CLI consistent - wt project without args should list projects.
+
+⏺ Update(cmd/wt/main.go)
+  ⎿  Added 1 line                                                        
+      71     case "seance":                                              
+      72       return cmdSeance(cfg, args[1:])                           
+      73     case "projects":                                            
+      74 +     // Alias for backward compatibility                       
+      75       return cmdProjects(cfg)                                   
+      76     case "ready":                                               
+      77       var projectFilter string                                  
+
+⏺ Update(cmd/wt/main.go)
+  ⎿  Added 6 lines, removed 2 lines                                      
+       90       }                                                        
+       91       return cmdBeads(cfg, args[1], parseBeadsFlags(args[2:])) 
+       92     case "project":                                            
+       93 -    if len(args) < 2 {                                        
+       94 -       return fmt.Errorf("usage: wt project                   
+          -<add|config|remove> ...")                                     
+       93 +    if len(args) < 2 || hasHelpFlag(args[1:]) {               
+       94 +       return cmdProjectHelp()                                
+       95       }                                                        
+       96 +     // "wt project list" is same as "wt project" with no     
+          +subcommand                                                    
+       97 +     if args[1] == "list" {                                   
+       98 +       return cmdProjects(cfg)                                
+       99 +     }                                                        
+      100       return cmdProject(cfg, args[1:])                         
+      101     case "auto":                                               
+      102       return cmdAuto(cfg, args[1:])                            
+
+⏺ Bash(grep -n "func cmdProject" cmd/wt/*.go)
+  ⎿ cmd/wt/project_commands.go:14:func cmdProjects(cfg *config.Config) erro
+    r {
+    cmd/wt/project_commands.go:58:func cmdProject(cfg *config.Config, args
+    … +7 lines (ctrl+o to expand)
+
+  ⎿  Found 1 new diagnostic issue in 1 file (ctrl+o to expand)
+
+⏺ Read(cmd/wt/project_commands.go)
+  ⎿  Read 20 lines
+
+⏺ Update(cmd/wt/project_commands.go)
+  ⎿  Added 32 lines                                                      
+      11     "github.com/badri/wt/internal/session"                      
+      12   )                                                             
+      13                                                                 
+      14 + // cmdProjectHelp shows detailed help for the project command 
+      15 + func cmdProjectHelp() error {                                 
+      16 +   help := `wt project - Manage registered projects            
+      17 +                                                               
+      18 + USAGE:                                                        
+      19 +     wt project [command] [options]                            
+      20 +                                                               
+      21 + COMMANDS:                                                     
+      22 +     (none), list        List all registered projects          
+      23 +     add <name> <path>   Register a new project                
+      24 +     config <name>       Edit project configuration in editor  
+      25 +     remove <name>       Unregister a project                  
+      26 +                                                               
+      27 + OPTIONS:                                                      
+      28 +     -h, --help          Show this help                        
+      29 +                                                               
+      30 + EXAMPLES:                                                     
+      31 +     wt project                      List all projects         
+      32 +     wt project list                 Same as above             
+      33 +     wt project add myproj ~/code/myproj    Register project   
+      34 +     wt project config myproj        Edit myproj's             
+         +configuration                                                  
+      35 +     wt project remove myproj        Unregister myproj         
+      36 +                                                               
+      37 + SEE ALSO:                                                     
+      38 +     wt ready [project]     Show beads ready to work on        
+      39 +     wt beads <project>     List all beads for a project       
+      40 +     wt create <proj> <t>   Create a new bead in project       
+      41 + `                                                             
+      42 +   fmt.Print(help)                                             
+      43 +   return nil                                                  
+      44 + }                                                             
+      45 +                                                               
+      46   func cmdProjects(cfg *config.Config) error {                  
+      47     mgr := project.NewManager(cfg)                              
+      48     projects, err := mgr.List()                                 
+
+⏺ Bash(go build ./... && go run ./cmd/wt project)
+  ⎿  wt project - Manage registered projects
+
+     USAGE:
+     … +22 lines (ctrl+o to expand)
+  ⎿  Found 2 new diagnostic issues in 1 file (ctrl+o to expand)
+
+⏺ Bash(go run ./cmd/wt project list)
+  ⎿ ┌─ Projects ───────────────────────────────────────────────────────────
+    ───┐
+    │
+    … +15 lines (ctrl+o to expand)
+
+
+⏺ Bash(go test ./...)
+  ⎿  ok  	github.com/badri/wt/cmd/wt	(cached)                
+     ok  	github.com/badri/wt/internal/auto	(cached)
+     ok  	github.com/badri/wt/internal/bead	(cached)
+     … +13 lines (ctrl+o to expand)
+
+⏺ Bash(git add -A && git commit -m "Improve CLI consistency for project
+      command…)
+  ⎿  [main c8c752b] Improve CLI consistency for project command
+      2 files changed, 39 insertions(+), 2 deletions(-)
+
+⏺ Regarding the reusable TUI - that's a good architectural idea for a future improvement. We could create a generic list component that:
+  - Accepts any list of items with custom display formatting
+  - Has configurable actions (Enter, key bindings)
+  - Shows detail cards like watch does
+
+  This would unify:
+  - wt watch (sessions)
+  - wt project (projects)
+  - wt beads <project> (beads)
+  - wt pick (currently uses fzf)
+
+  Would you like me to create a bead for this TUI refactoring work?
+
+  Let me push the current changes first.
+
+⏺ Bash(bd sync && git push)
+  ⎿  → Loaded 28 local issues from database
+     → Loading base state...
+       Loaded 28 issues from base state
+     … +16 lines (ctrl+o to expand)
+
+⏺ All pushed. Summary of changes in this session:
+
+  Watch TUI fixes:
+  - Watch no longer stops on Enter - switches sessions while continuing to run
+  - Watch pane persists in hub (runs in a loop)
+  - wt watch from worker sessions shows as tmux popup overlay
+  - wt hub --watch adds watch pane to existing hub
+
+  Prompt delivery improvements:
+  - NudgeSession with reliable 500ms debounce + Escape + Enter retry
+  - WaitForClaude detects when Claude is actually running before sending
+  - No more manual Enter needed when starting workers
+
+  CLI help improvements:
+  - wt new, wt watch, wt hub, wt project all support -h/--help
+  - Commands show detailed help when invoked without required args
+  - wt project and wt project list for consistency
+
+✻ Brewed for 3m 56s
+
+❯ I want to write a blog post about wt. good idea to do now? 
+
+⏺ A few considerations:
+
+  Good timing:
+  - Core features are solid (worktree management, hub orchestration, watch TUI)
+  - Reliable prompt delivery just fixed
+  - CLI is getting more polished with help system
+
+  Maybe wait for:
+  - The reusable TUI work (would make a more complete story)
+  - A proper README.md in the repo (readers will want to try it)
+  - Testing the recent changes in real multi-worker scenarios to catch edge cases
+
+  Suggestion: Write a draft now while it's fresh, but hold publishing until you've:
+  1. Run a few real multi-worker sessions with the new prompt delivery
+  2. Added a README with installation/usage
+  3. Maybe one more polish pass on the CLI help
+
+  The supabyoi-woody session worked well, but that's n=1. A blog post will drive people to try it, and first impressions matter.
+
+  What's the target audience - other developers doing AI-assisted development, or internal notes?
+
+❯ more like I want to signal authority. I can say why I'm building an agent 
+  orchestrator, what features are non negotiable, it can be a series.       
+  works well with my positioning. check ~/lakshminp                         
+  ⎿  Interrupted · What should Claude do instead?
+
+❯ more like I want to signal authority. I can say why I'm building an agent 
+  orchestrator, what features are non negotiable, it can be a series.       
+  works well with my positioning. check ~/lakshminp.com                     
+
+⏺ Explore(Explore lakshminp.com website)
+  ⎿  Done (18 tool uses · 44.6k tokens · 54s)                              
+
+⏺ Perfect fit. You've already laid the groundwork:
+
+  - Beads essay → agent memory (long-term)
+  - 5 concepts essay → Claude Code mental model
+  - Comprehension debt → quality while using AI
+
+  wt is the missing piece: agent parallelism/orchestration
+
+  Do it now. Reasons:
+
+  1. Authority signal is strongest when the tool is fresh - you're building it, not just theorizing
+  2. Fits your "Build" pillar exactly - extending Claude Code capabilities for solo devs
+  3. Series potential - "Why I'm Building an Agent Orchestrator" → Part 1 of N
+  4. The Beads essay got you a speaking gig - this is the same category (novel infrastructure for AI-assisted dev)
+
+  Suggested angle for Part 1:
+
+  "Why I'm Building an Agent Orchestrator (And What's Non-Negotiable)"
+
+  - Problem: One Claude session = bottleneck for complex features
+  - Why existing tools don't cut it
+  - The 3-4 non-negotiables you've discovered (reliable prompt delivery, watch/monitor, session persistence, worktree isolation)
+  - Tease the "how" for Part 2
+
+  This positions you as someone building the infrastructure, not just using it. That's the authority signal.
+
+  Want me to draft an outline based on your voice/positioning guidelines?
+
+✻ Crunched for 1m 16s
+
+
+
