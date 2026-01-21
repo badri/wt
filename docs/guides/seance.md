@@ -53,21 +53,37 @@ wt seance
 
 Output:
 ```
-Past Sessions:
-  toast (myproject-abc) - 2h ago - Add auth flow
-  shadow (myproject-def) - 1d ago - Fix login bug
-  obsidian (myproject-ghi) - 3d ago - Update API
+Past Sessions (seance)
+
+     Session             Title                                 Project         Time
+────────────────────────────────────────────────────────────────────────────────────
+ ⚙️  myproject-toast     Add OAuth authentication flow         myproject       2026-01-20 14:30
+ ⚙️  myproject-shadow    Fix login redirect bug                myproject       2026-01-19 10:15
+ 🏠  hub                                                                       2026-01-20 12:00
+
+⚙️ = Worker session   🏠 = Hub session
 ```
+
+Sessions are logged when they end via `wt done`, `wt close`, or `wt kill`. Hub sessions are logged on `wt handoff`.
 
 ### Interactive Session
 
 Start a conversation with a past session:
 
 ```bash
-wt seance toast
+wt seance toast           # Opens in new tmux pane (safe from hub)
+wt seance toast --spawn   # Creates new tmux session
 ```
 
 This opens an interactive Claude session with full context from the original work.
+
+### Resume Hub Sessions
+
+You can also resume past hub sessions:
+
+```bash
+wt seance hub --spawn     # Resume most recent hub in new tmux session
+```
 
 ### One-Shot Query
 

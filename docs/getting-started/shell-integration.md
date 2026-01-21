@@ -74,3 +74,31 @@ wt pick
 ```
 
 This works with fzf if available, or falls back to a numbered prompt.
+
+## Shell History
+
+wt sends commands to tmux sessions using `tmux send-keys`. To prevent these commands from appearing in your shell history, configure your shell to ignore commands that start with a space.
+
+### Bash
+
+Add to your `~/.bashrc`:
+
+```bash
+HISTCONTROL=ignorespace
+```
+
+Or to ignore both space-prefixed commands and duplicates:
+
+```bash
+HISTCONTROL=ignoreboth
+```
+
+### Zsh
+
+Add to your `~/.zshrc`:
+
+```zsh
+setopt HIST_IGNORE_SPACE
+```
+
+With this configuration, commands sent by wt (which are prefixed with a space) won't appear in your shell history.

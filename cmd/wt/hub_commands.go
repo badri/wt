@@ -9,11 +9,13 @@ import (
 
 	"github.com/charmbracelet/bubbles/table"
 
+	"github.com/badri/wt/internal/bead"
 	"github.com/badri/wt/internal/config"
 	"github.com/badri/wt/internal/events"
 	"github.com/badri/wt/internal/handoff"
 	"github.com/badri/wt/internal/hub"
 	"github.com/badri/wt/internal/monitor"
+	"github.com/badri/wt/internal/project"
 	"github.com/badri/wt/internal/session"
 	"github.com/badri/wt/internal/tmux"
 )
@@ -319,7 +321,7 @@ func cmdSeance(cfg *config.Config, args []string) error {
 
 	// No args - list recent sessions
 	if len(args) == 0 {
-		return cmdSeanceList(eventLogger)
+		return cmdSeanceList(cfg, eventLogger)
 	}
 
 	// Parse flags
@@ -362,7 +364,7 @@ func cmdSeance(cfg *config.Config, args []string) error {
 	return cmdSeanceResume(cfg, event)
 }
 
-func cmdSeanceList(logger *events.Logger) error {
+func cmdSeanceList(cfg *config.Config, logger *events.Logger) error {
 	sessions, err := logger.RecentSessions(10)
 	if err != nil {
 		return err
@@ -373,14 +375,17 @@ func cmdSeanceList(logger *events.Logger) error {
 		return nil
 	}
 
-	// Define columns
+	// Define columns (matching wt list style)
 	columns := []table.Column{
 		{Title: "", Width: 2},
-		{Title: "Session", Width: 10},
-		{Title: "Bead", Width: 18},
+		{Title: "Session", Width: 18},
+		{Title: "Title", Width: 36},
 		{Title: "Project", Width: 14},
 		{Title: "Time", Width: 16},
 	}
+
+	// Cache project configs to avoid repeated lookups
+	projectMgr := project.NewManager(cfg)
 
 	// Build rows
 	var rows []table.Row
@@ -394,29 +399,39 @@ func cmdSeanceList(logger *events.Logger) error {
 			if sess.Type == events.EventHubHandoff {
 				icon = "🏠"
 			} else {
-				icon = "💬"
+				icon = "⚙️"
 			}
 		}
 
-		// For hub sessions, show special values
-		beadDisplay := sess.Bead
+		// Get title - for workers, fetch from bead; for hub, leave empty
+		title := ""
 		projectDisplay := sess.Project
 		if sess.Type == events.EventHubHandoff {
-			beadDisplay = "(hub)"
-			projectDisplay = "(orchestrator)"
+			projectDisplay = ""
+		} else if sess.Bead != "" {
+			// Try to get bead title from the correct project's beads dir
+			beadsDir := ""
+			if proj, err := projectMgr.Get(sess.Project); err == nil && proj != nil {
+				beadsDir = proj.Repo + "/.beads"
+			}
+			if beadInfo, _ := bead.ShowInDir(sess.Bead, beadsDir); beadInfo != nil && beadInfo.Title != "" {
+				title = beadInfo.Title
+			} else {
+				title = sess.Bead // Fallback to bead ID
+			}
 		}
 
 		rows = append(rows, table.Row{
 			icon,
-			truncate(sess.Session, 10),
-			truncate(beadDisplay, 18),
+			truncate(sess.Session, 18),
+			truncate(title, 36),
 			truncate(projectDisplay, 14),
 			timeStr,
 		})
 	}
 
 	printTable("Past Sessions (seance)", columns, rows)
-	fmt.Println("\n💬 = Worker session   🏠 = Hub session")
+	fmt.Println("\n⚙️ = Worker session   🏠 = Hub session")
 	fmt.Println("\nCommands:")
 	fmt.Println("  wt seance <name>          Resume in new pane (safe from hub)")
 	fmt.Println("  wt seance <name> --spawn  Spawn new tmux session")

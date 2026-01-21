@@ -465,9 +465,10 @@ func cmdKill(cfg *config.Config, name string, flags killFlags) error {
 		}
 	}
 
-	// Log session kill event
+	// Log session end event (for seance resumption)
 	eventLogger := events.NewLogger(cfg)
-	eventLogger.LogSessionKill(name, sess.Bead, sess.Project)
+	claudeSession := getClaudeSessionID(sess.Worktree)
+	eventLogger.LogSessionEnd(name, sess.Bead, sess.Project, claudeSession, "killed", "")
 
 	// Remove from state
 	delete(state.Sessions, name)
@@ -534,6 +535,11 @@ func cmdClose(cfg *config.Config, name string) error {
 	if err := worktree.Remove(sess.Worktree); err != nil {
 		fmt.Printf("  Warning: %v\n", err)
 	}
+
+	// Log session end event (for seance resumption)
+	eventLogger := events.NewLogger(cfg)
+	claudeSession := getClaudeSessionID(sess.Worktree)
+	eventLogger.LogSessionEnd(name, sess.Bead, sess.Project, claudeSession, "closed", "")
 
 	// Remove from state
 	delete(state.Sessions, name)
@@ -994,16 +1000,56 @@ func cmdSwitch(cfg *config.Config, nameOrBead string) error {
 	return fmt.Errorf("no session found for '%s'", nameOrBead)
 }
 
-// getClaudeSessionID attempts to read the Claude session ID from a worktree
+// getClaudeSessionID gets the Claude session ID for seance resumption
 func getClaudeSessionID(worktreePath string) string {
-	// Claude Code stores session info in .claude/session
-	// Try to read it if it exists
-	sessionFile := worktreePath + "/.claude/session"
-	data, err := os.ReadFile(sessionFile)
-	if err != nil {
-		return ""
+	// Claude Code sets CLAUDE_SESSION_ID when running
+	// This is the most reliable way to get the session ID
+	if id := os.Getenv("CLAUDE_SESSION_ID"); id != "" {
+		return id
 	}
-	return string(data)
+
+	// Fallback: scan ~/.claude/projects/ for session files matching the worktree
+	// Claude stores sessions in directories named after the path (with - replacing /)
+	if worktreePath != "" {
+		homeDir, err := os.UserHomeDir()
+		if err == nil {
+			// Convert worktree path to Claude's directory naming convention
+			// e.g., /Users/lakshminp/worktrees/foo -> -Users-lakshminp-worktrees-foo
+			claudeDirName := strings.ReplaceAll(worktreePath, "/", "-")
+			projectDir := homeDir + "/.claude/projects/" + claudeDirName
+
+			// Find the most recently modified .jsonl file
+			entries, err := os.ReadDir(projectDir)
+			if err == nil {
+				var latestFile string
+				var latestTime int64
+				for _, entry := range entries {
+					if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".jsonl") {
+						info, err := entry.Info()
+						if err == nil && info.ModTime().Unix() > latestTime {
+							latestTime = info.ModTime().Unix()
+							latestFile = entry.Name()
+						}
+					}
+				}
+				if latestFile != "" {
+					// Extract session ID from filename (remove .jsonl)
+					return strings.TrimSuffix(latestFile, ".jsonl")
+				}
+			}
+		}
+	}
+
+	// Last fallback: try reading from .claude/session file (legacy)
+	if worktreePath != "" {
+		sessionFile := worktreePath + "/.claude/session"
+		data, err := os.ReadFile(sessionFile)
+		if err == nil {
+			return strings.TrimSpace(string(data))
+		}
+	}
+
+	return ""
 }
 
 // buildInitialPrompt creates the prompt to send to Claude when starting work on a bead

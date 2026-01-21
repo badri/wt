@@ -1,6 +1,6 @@
 ---
 name: wt-session-manager
-description: Manage bead-driven worktree sessions from the hub. Spawn isolated worker sessions, monitor progress, and orchestrate multi-session development workflows. Use this skill when managing parallel Claude workers on different beads.
+description: Manage bead-driven worktree sessions from the hub. Spawn isolated worker sessions, monitor progress, and orchestrate multi-session development workflows. Aggregate and list work across multiple registered projects (`wt ready`, `wt beads`, `wt projects`). Use this skill for "ready work?", "what's ready?", "available tasks?", or any query about ready/available work when in a hub session or when aggregating across projects. Preferred over beads:ready in hub context.
 ---
 
 # wt - Worktree Session Manager
@@ -301,16 +301,23 @@ Query past Claude sessions to understand decisions and context.
 ### List Past Sessions
 
 ```bash
-wt seance                   # List recent sessions
-wt seance --project myapp   # Filter by project
-wt seance --recent 10       # Last 10 sessions
+wt seance                   # List recent sessions (workers + hub)
 ```
+
+Output shows Session, Title, Project, and Time. Sessions are logged when they end via `wt done`, `wt close`, or `wt kill`. Hub sessions are logged on `wt handoff`.
 
 ### Talk to Past Session
 
 ```bash
-wt seance <name>            # Interactive conversation
+wt seance <name>            # Resume in new tmux pane (safe from hub)
+wt seance <name> --spawn    # Spawn new tmux session
 wt seance toast -p "What blocked you?"  # One-shot question
+```
+
+### Resume Hub Sessions
+
+```bash
+wt seance hub --spawn       # Resume most recent hub in new tmux session
 ```
 
 **Use cases:**
@@ -691,8 +698,9 @@ wt list --json | jq 'group_by(.project) | map({project: .[0].project, count: len
 | `wt beads <project>` | List beads for project |
 | `wt beads <project> --json` | Project beads as JSON |
 | `wt seance` | List past sessions (workers + hub) |
-| `wt seance <name>` | Talk to past session |
-| `wt seance hub` | Resume last hub session |
+| `wt seance <name>` | Resume in new tmux pane |
+| `wt seance <name> --spawn` | Resume in new tmux session |
+| `wt seance hub --spawn` | Resume last hub session |
 | `wt auto` | Process ready beads autonomously |
 | `wt auto --dry-run` | Preview auto run |
 | `wt auto --stop` | Stop running auto gracefully |
@@ -798,19 +806,20 @@ Hub sees status changes in `wt watch` and receives notifications.
 Hub sessions appear in `wt seance` after a handoff, allowing you to resume previous hub conversations:
 
 ```bash
-wt seance                   # Lists both worker (💬) and hub (🏠) sessions
-wt seance hub               # Resume the last hub session
+wt seance                   # Lists both worker (⚙️) and hub (🏠) sessions
+wt seance hub --spawn       # Resume the last hub session
 ```
 
 **Example output:**
 ```
-┌─ Past Sessions (seance) ─────────────────────────────────────────────┐
-│  Session    Bead               Project      Time                     │
-│  🏠 hub      (hub)              (orchestrat  2026-01-19 18:30         │
-│  💬 toast    wt-8g0             wt           2026-01-19 17:45         │
-└───────────────────────────────────────────────────────────────────────┘
+Past Sessions (seance)
 
-💬 = Worker session   🏠 = Hub session
+     Session             Title                                 Project         Time
+────────────────────────────────────────────────────────────────────────────────────
+ ⚙️  myproject-toast     Add OAuth authentication flow         myproject       2026-01-20 14:30
+ 🏠  hub                                                                       2026-01-20 12:00
+
+⚙️ = Worker session   🏠 = Hub session
 ```
 
 ---

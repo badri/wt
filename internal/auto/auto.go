@@ -264,7 +264,8 @@ func (r *Runner) createSession(beadID string) (string, error) {
 // runClaudeInSession runs claude in a tmux session and waits for completion
 func (r *Runner) runClaudeInSession(sessionName, command, prompt string, timeout time.Duration) (string, error) {
 	// Send command to tmux session
-	fullCmd := fmt.Sprintf("%s -p %q", command, prompt)
+	// Prefix with space to avoid shell history
+	fullCmd := fmt.Sprintf(" %s -p %q", command, prompt)
 	tmuxCmd := exec.Command("tmux", "send-keys", "-t", sessionName, fullCmd, "Enter")
 	if err := tmuxCmd.Run(); err != nil {
 		return "failed-send", fmt.Errorf("sending command to tmux: %w", err)

@@ -169,8 +169,13 @@ func create(cfg *config.Config, opts *Options) error {
 	// Get editor command from config
 	editorCmd := cfg.EditorCmd
 	if editorCmd != "" {
+		// Append hub context prompt so Claude knows it's in hub mode
+		hubPrompt := `You are in the **hub session**. For queries about ready/available work, use ` + "`wt ready`" + ` (not bd ready) to see work across ALL registered projects. Prefer /wt skill over /beads:ready in this context.`
+		fullCmd := fmt.Sprintf("%s -p %q", editorCmd, hubPrompt)
+
 		// Send the editor command to start
-		sendCmd := exec.Command("tmux", "send-keys", "-t", HubSessionName, editorCmd, "Enter")
+		// Prefix with space to avoid shell history
+		sendCmd := exec.Command("tmux", "send-keys", "-t", HubSessionName, " "+fullCmd, "Enter")
 		if err := sendCmd.Run(); err != nil {
 			return fmt.Errorf("starting editor in hub: %w", err)
 		}
@@ -185,7 +190,8 @@ func create(cfg *config.Config, opts *Options) error {
 		} else {
 			// Start wt watch in a loop so it restarts if user quits
 			// This ensures the watch pane stays active
-			watchCmd := exec.Command("tmux", "send-keys", "-t", HubSessionName+".1", "while true; do wt watch; sleep 1; done", "Enter")
+			// Prefix with space to avoid shell history
+			watchCmd := exec.Command("tmux", "send-keys", "-t", HubSessionName+".1", " while true; do wt watch; sleep 1; done", "Enter")
 			_ = watchCmd.Run() // Non-fatal if this fails
 
 			// Focus back on the main pane (pane 0)
@@ -232,7 +238,8 @@ func addWatchPane() error {
 	}
 
 	// Start wt watch in a loop
-	watchCmd := exec.Command("tmux", "send-keys", "-t", HubSessionName+".1", "while true; do wt watch; sleep 1; done", "Enter")
+	// Prefix with space to avoid shell history
+	watchCmd := exec.Command("tmux", "send-keys", "-t", HubSessionName+".1", " while true; do wt watch; sleep 1; done", "Enter")
 	_ = watchCmd.Run()
 
 	// Focus back on main pane

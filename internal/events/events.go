@@ -108,7 +108,7 @@ func (l *Logger) LogSessionKill(session, bead, project string) error {
 }
 
 // LogHubHandoff logs a hub handoff event (hub session can be resumed via seance)
-func (l *Logger) LogHubHandoff(claudeSession, message string) error {
+func (l *Logger) LogHubHandoff(claudeSession, message, workdir string) error {
 	return l.Log(&Event{
 		Type:          EventHubHandoff,
 		Session:       "hub",
@@ -116,6 +116,7 @@ func (l *Logger) LogHubHandoff(claudeSession, message string) error {
 		Project:       "",
 		ClaudeSession: claudeSession,
 		MergeMode:     message, // Reuse field for handoff message
+		WorktreePath:  workdir, // Working directory for session resumption
 	})
 }
 

@@ -53,8 +53,9 @@ func NewSession(name, workdir, beadsDir, editorCmd string, opts *SessionOptions)
 	}
 
 	// Send the editor command to start
+	// Prefix with space to avoid shell history (requires HISTCONTROL=ignorespace or setopt HIST_IGNORE_SPACE)
 	if editorCmd != "" {
-		sendCmd := exec.Command("tmux", "send-keys", "-t", name, editorCmd, "Enter")
+		sendCmd := exec.Command("tmux", "send-keys", "-t", name, " "+editorCmd, "Enter")
 		if err := sendCmd.Run(); err != nil {
 			return fmt.Errorf("starting editor: %w", err)
 		}
@@ -84,7 +85,8 @@ func NewSeanceSession(name, workdir, editorCmd, claudeSessionID string, switchTo
 	}
 
 	// Send the claude --resume command using the configured editor
-	resumeCmd := fmt.Sprintf("%s --resume %s", editorCmd, claudeSessionID)
+	// Prefix with space to avoid shell history
+	resumeCmd := fmt.Sprintf(" %s --resume %s", editorCmd, claudeSessionID)
 	sendCmd := exec.Command("tmux", "send-keys", "-t", name, resumeCmd, "Enter")
 	if err := sendCmd.Run(); err != nil {
 		return fmt.Errorf("starting claude resume: %w", err)
@@ -231,6 +233,21 @@ func AcceptBypassPermissionsWarning(session string) error {
 func Kill(name string) error {
 	cmd := exec.Command("tmux", "kill-session", "-t", name)
 	return cmd.Run()
+}
+
+// GetSessionEnv gets an environment variable from a tmux session
+func GetSessionEnv(session, varName string) string {
+	cmd := exec.Command("tmux", "show-environment", "-t", session, varName)
+	output, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	// Output is "VAR=value\n", extract the value
+	line := strings.TrimSpace(string(output))
+	if idx := strings.Index(line, "="); idx != -1 {
+		return line[idx+1:]
+	}
+	return ""
 }
 
 func SessionExists(name string) bool {

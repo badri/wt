@@ -62,6 +62,28 @@ wt doctor
 
 This will verify that all dependencies are installed and configured correctly.
 
+## Claude Permissions
+
+By default, wt launches Claude with `--dangerously-skip-permissions`. This flag:
+
+- **Skips permission prompts** - Claude can read/write files, run commands, etc. without asking
+- **Enables autonomous operation** - Workers can complete tasks without human intervention
+- **Required for automation** - Features like `wt auto` depend on unattended execution
+
+!!! warning "Security Consideration"
+    This flag gives Claude full access to your system within the session. Only use wt in trusted environments with code you trust.
+
+### Customizing the Editor Command
+
+To use a different command or remove the flag:
+
+```bash
+wt config set editor_cmd "claude"  # Interactive mode with permission prompts
+wt config set editor_cmd "claude --dangerously-skip-permissions --model sonnet"  # Custom flags
+```
+
+See [Configuration Reference](../reference/configuration.md) for all options.
+
 ## Claude Code Skill Setup
 
 **This is the most important step.** Most wt usage happens through Claude conversations, not direct CLI commands.

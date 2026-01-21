@@ -90,7 +90,8 @@ func Run(cfg *config.Config, opts *Options) (*Result, error) {
 	claudeSession := getClaudeSession()
 	if claudeSession != "" {
 		logger := events.NewLogger(cfg)
-		if err := logger.LogHubHandoff(claudeSession, opts.Message); err != nil {
+		cwd, _ := os.Getwd()
+		if err := logger.LogHubHandoff(claudeSession, opts.Message, cwd); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: could not log hub handoff: %v\n", err)
 		}
 	}
@@ -277,19 +278,20 @@ func getSessionName() string {
 }
 
 // getClaudeSession returns the Claude session ID for seance resumption
+// Returns empty string if not available (session won't be resumable via seance)
 func getClaudeSession() string {
-	// Claude Code sets this environment variable
-	if id := os.Getenv("CLAUDE_SESSION_ID"); id != "" {
-		return id
-	}
-	// Fallback to session name which can also be used
-	return getSessionName()
+	// Claude Code sets this environment variable when running
+	// If not set, we can't resume this session via claude --resume
+	return os.Getenv("CLAUDE_SESSION_ID")
 }
 
 // clearTmuxHistory clears the tmux pane history
 func clearTmuxHistory() {
 	exec.Command("tmux", "clear-history").Run()
 }
+
+// HubPrompt is the context prompt injected when starting Claude in hub mode
+const HubPrompt = "You are in the **hub session**. For queries about ready/available work, use `wt ready` (not bd ready) to see work across ALL registered projects. Prefer /wt skill over /beads:ready in this context."
 
 // respawnClaude respawns Claude in the current tmux pane
 func respawnClaude(cfg *config.Config) error {
@@ -308,6 +310,11 @@ func respawnClaude(cfg *config.Config) error {
 	editorCmd := cfg.EditorCmd
 	if editorCmd == "" {
 		editorCmd = "claude"
+	}
+
+	// If in hub session, add hub context prompt
+	if os.Getenv("WT_HUB") == "1" {
+		editorCmd = fmt.Sprintf("%s -p %q", editorCmd, HubPrompt)
 	}
 
 	// Build respawn command - start fresh Claude with same flags
