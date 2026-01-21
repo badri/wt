@@ -105,6 +105,39 @@ type doneFlags struct {
 	noRebase  bool
 }
 
+type listFlags struct {
+	all     bool   // Include past sessions
+	project string // Filter by project
+	since   string // Filter by time (e.g., "1d", "1w")
+	status  string // Filter by status (completed, killed, abandoned)
+}
+
+func parseListFlags(args []string) listFlags {
+	var flags listFlags
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--all", "-a":
+			flags.all = true
+		case "--project", "-p":
+			if i+1 < len(args) {
+				flags.project = args[i+1]
+				i++
+			}
+		case "--since", "-s":
+			if i+1 < len(args) {
+				flags.since = args[i+1]
+				i++
+			}
+		case "--status":
+			if i+1 < len(args) {
+				flags.status = args[i+1]
+				i++
+			}
+		}
+	}
+	return flags
+}
+
 func parseDoneFlags(args []string) doneFlags {
 	var flags doneFlags
 	for i := 0; i < len(args); i++ {
@@ -137,60 +170,56 @@ type SessionJSON struct {
 	LastActivity        string `json:"last_activity"`
 }
 
-func cmdList(cfg *config.Config) error {
+// ListSessionEntry represents a session for display in the list
+type ListSessionEntry struct {
+	Name      string
+	Type      string // "bead", "task", or "past"
+	Status    string
+	Title     string
+	Project   string
+	CreatedAt string
+	EndedAt   string // For past sessions
+	Duration  string // Formatted duration
+	IsPast    bool
+	MergeMode string // For past sessions (how it ended)
+}
+
+func cmdList(cfg *config.Config, args []string) error {
+	flags := parseListFlags(args)
+
 	state, err := session.LoadState(cfg)
 	if err != nil {
 		return err
 	}
 
-	if len(state.Sessions) == 0 {
-		printEmptyMessage("No active sessions.", "Commands: wt new <bead> | wt <name> (switch)")
-		return nil
-	}
+	// Build unified list of sessions
+	var entries []ListSessionEntry
 
-	// JSON output
-	if outputJSON {
-		var sessions []SessionJSON
-		for name, sess := range state.Sessions {
-			status := sess.Status
-			if status == "" {
-				status = "working"
-			}
-			sessionType := "bead"
-			if sess.IsTask() {
-				sessionType = "task"
-			}
-			sessions = append(sessions, SessionJSON{
-				Name:                name,
-				Type:                sessionType,
-				Bead:                sess.Bead,
-				TaskDescription:     sess.TaskDescription,
-				CompletionCondition: string(sess.CompletionCondition),
-				Project:             sess.Project,
-				Worktree:            sess.Worktree,
-				Branch:              sess.Branch,
-				Status:              status,
-				StatusMessage:       sess.StatusMessage,
-				CreatedAt:           sess.CreatedAt,
-				LastActivity:        sess.LastActivity,
-			})
-		}
-		printJSON(sessions)
-		return nil
-	}
-
-	// Define columns - Type column helps distinguish beads from tasks
-	columns := []table.Column{
-		{Title: "Name", Width: 18},
-		{Title: "Type", Width: 6},
-		{Title: "Status", Width: 10},
-		{Title: "Title", Width: 32},
-		{Title: "Project", Width: 12},
-	}
-
-	// Build rows
-	var rows []table.Row
+	// Add active sessions
 	for name, sess := range state.Sessions {
+		// Apply project filter
+		if flags.project != "" && sess.Project != flags.project {
+			continue
+		}
+
+		// Apply since filter to active sessions
+		if flags.since != "" {
+			duration, err := parseDurationString(flags.since)
+			if err == nil {
+				if sess.CreatedAt != "" {
+					createdAt, err := time.Parse(time.RFC3339, sess.CreatedAt)
+					if err == nil && time.Since(createdAt) > duration {
+						continue
+					}
+				}
+			}
+		}
+
+		// Status filter doesn't apply to active sessions in "completed/killed/abandoned" mode
+		if flags.status != "" && (flags.status == "completed" || flags.status == "killed" || flags.status == "abandoned") {
+			continue
+		}
+
 		status := sess.Status
 		if status == "" {
 			status = "working"
@@ -209,19 +238,275 @@ func cmdList(cfg *config.Config) error {
 			}
 		}
 
-		rows = append(rows, table.Row{
-			name,
-			sessionType,
-			status,
-			truncate(title, 32),
-			truncate(sess.Project, 12),
+		// Calculate duration
+		durationStr := ""
+		if sess.CreatedAt != "" {
+			durationStr = formatSessionDuration(sess.CreatedAt, "")
+		}
+
+		entries = append(entries, ListSessionEntry{
+			Name:      name,
+			Type:      sessionType,
+			Status:    status,
+			Title:     title,
+			Project:   sess.Project,
+			CreatedAt: sess.CreatedAt,
+			Duration:  durationStr,
+			IsPast:    false,
 		})
 	}
 
-	printTable("Active Sessions", columns, rows)
-	fmt.Println("\nCommands: wt <name> (switch) | wt new <bead> | wt task <desc> | wt close <name>")
+	// Add past sessions if --all flag is set
+	if flags.all {
+		eventLogger := events.NewLogger(cfg)
+		var historyEvents []events.Event
+
+		if flags.since != "" {
+			duration, err := parseDurationString(flags.since)
+			if err != nil {
+				return fmt.Errorf("invalid duration format: %s (use 1d, 1w, 2h, etc.)", flags.since)
+			}
+			historyEvents, err = eventLogger.Since(duration)
+			if err != nil {
+				return fmt.Errorf("reading events: %w", err)
+			}
+		} else {
+			// Default to last 100 events when no since filter
+			historyEvents, err = eventLogger.Recent(100)
+			if err != nil {
+				return fmt.Errorf("reading events: %w", err)
+			}
+		}
+
+		// Build a map of session start times from session_start events
+		startTimes := make(map[string]string)
+		for _, e := range historyEvents {
+			if e.Type == events.EventSessionStart {
+				startTimes[e.Session] = e.Time
+			}
+		}
+
+		// Process session_end events for past sessions
+		for _, e := range historyEvents {
+			if e.Type != events.EventSessionEnd {
+				continue
+			}
+
+			// Skip sessions that are still active
+			if _, active := state.Sessions[e.Session]; active {
+				continue
+			}
+
+			// Apply project filter
+			if flags.project != "" && e.Project != flags.project {
+				continue
+			}
+
+			// Determine status based on merge mode
+			status := "completed"
+			if e.MergeMode == "killed" {
+				status = "killed"
+			} else if e.MergeMode == "abandoned" {
+				status = "abandoned"
+			} else if e.MergeMode == "closed" {
+				status = "closed"
+			}
+
+			// Apply status filter
+			if flags.status != "" && status != flags.status {
+				continue
+			}
+
+			// Calculate duration
+			startTime := startTimes[e.Session]
+			durationStr := formatSessionDuration(startTime, e.Time)
+
+			title := e.Bead
+			if e.PRURL != "" {
+				title = e.Bead + " (PR)"
+			}
+
+			entries = append(entries, ListSessionEntry{
+				Name:      e.Session,
+				Type:      "past",
+				Status:    status,
+				Title:     title,
+				Project:   e.Project,
+				CreatedAt: startTime,
+				EndedAt:   e.Time,
+				Duration:  durationStr,
+				IsPast:    true,
+				MergeMode: e.MergeMode,
+			})
+		}
+	}
+
+	if len(entries) == 0 {
+		if flags.all {
+			printEmptyMessage("No sessions found.", "Try: wt list --all --since 1w")
+		} else {
+			printEmptyMessage("No active sessions.", "Commands: wt new <bead> | wt list --all")
+		}
+		return nil
+	}
+
+	// JSON output
+	if outputJSON {
+		type ListSessionJSON struct {
+			Name      string `json:"name"`
+			Type      string `json:"type"`
+			Status    string `json:"status"`
+			Title     string `json:"title"`
+			Project   string `json:"project"`
+			CreatedAt string `json:"created_at,omitempty"`
+			EndedAt   string `json:"ended_at,omitempty"`
+			Duration  string `json:"duration,omitempty"`
+			IsPast    bool   `json:"is_past"`
+			MergeMode string `json:"merge_mode,omitempty"`
+		}
+		var jsonEntries []ListSessionJSON
+		for _, e := range entries {
+			jsonEntries = append(jsonEntries, ListSessionJSON{
+				Name:      e.Name,
+				Type:      e.Type,
+				Status:    e.Status,
+				Title:     e.Title,
+				Project:   e.Project,
+				CreatedAt: e.CreatedAt,
+				EndedAt:   e.EndedAt,
+				Duration:  e.Duration,
+				IsPast:    e.IsPast,
+				MergeMode: e.MergeMode,
+			})
+		}
+		printJSON(jsonEntries)
+		return nil
+	}
+
+	// Define columns with Duration
+	columns := []table.Column{
+		{Title: "Name", Width: 18},
+		{Title: "Type", Width: 6},
+		{Title: "Status", Width: 10},
+		{Title: "Duration", Width: 10},
+		{Title: "Title", Width: 26},
+		{Title: "Project", Width: 12},
+	}
+
+	// Build rows
+	var rows []table.Row
+	for _, entry := range entries {
+		rows = append(rows, table.Row{
+			entry.Name,
+			entry.Type,
+			entry.Status,
+			entry.Duration,
+			truncate(entry.Title, 26),
+			truncate(entry.Project, 12),
+		})
+	}
+
+	title := "Active Sessions"
+	if flags.all {
+		title = "Sessions (Active + Past)"
+	}
+	printTable(title, columns, rows)
+
+	if flags.all {
+		fmt.Println("\nCommands: wt <name> (switch) | wt seance <name> (resume past)")
+	} else {
+		fmt.Println("\nCommands: wt <name> (switch) | wt new <bead> | wt list --all")
+	}
 
 	return nil
+}
+
+// parseDurationString parses duration strings like "1d", "2w", "3h", "30m"
+func parseDurationString(s string) (time.Duration, error) {
+	if s == "" {
+		return 0, fmt.Errorf("empty duration")
+	}
+
+	// Check for standard Go duration format first
+	if d, err := time.ParseDuration(s); err == nil {
+		return d, nil
+	}
+
+	// Parse custom formats: Nd (days), Nw (weeks)
+	if len(s) < 2 {
+		return 0, fmt.Errorf("invalid duration: %s", s)
+	}
+
+	numStr := s[:len(s)-1]
+	unit := s[len(s)-1:]
+
+	var num int
+	if _, err := fmt.Sscanf(numStr, "%d", &num); err != nil {
+		return 0, fmt.Errorf("invalid duration: %s", s)
+	}
+
+	switch unit {
+	case "d":
+		return time.Duration(num) * 24 * time.Hour, nil
+	case "w":
+		return time.Duration(num) * 7 * 24 * time.Hour, nil
+	case "h":
+		return time.Duration(num) * time.Hour, nil
+	case "m":
+		return time.Duration(num) * time.Minute, nil
+	default:
+		return 0, fmt.Errorf("unknown duration unit: %s (use d, w, h, m)", unit)
+	}
+}
+
+// formatSessionDuration formats the duration between start and end times
+func formatSessionDuration(startTime, endTime string) string {
+	if startTime == "" {
+		return "-"
+	}
+
+	start, err := time.Parse(time.RFC3339, startTime)
+	if err != nil {
+		return "-"
+	}
+
+	var end time.Time
+	if endTime == "" {
+		end = time.Now()
+	} else {
+		end, err = time.Parse(time.RFC3339, endTime)
+		if err != nil {
+			return "-"
+		}
+	}
+
+	duration := end.Sub(start)
+
+	// Handle negative or zero durations (shouldn't happen but be safe)
+	if duration <= 0 {
+		return "-"
+	}
+
+	// Format based on duration size
+	if duration < time.Minute {
+		return fmt.Sprintf("%ds", int(duration.Seconds()))
+	} else if duration < time.Hour {
+		return fmt.Sprintf("%dm", int(duration.Minutes()))
+	} else if duration < 24*time.Hour {
+		hours := int(duration.Hours())
+		mins := int(duration.Minutes()) % 60
+		if mins > 0 {
+			return fmt.Sprintf("%dh%dm", hours, mins)
+		}
+		return fmt.Sprintf("%dh", hours)
+	} else {
+		days := int(duration.Hours() / 24)
+		hours := int(duration.Hours()) % 24
+		if hours > 0 {
+			return fmt.Sprintf("%dd%dh", days, hours)
+		}
+		return fmt.Sprintf("%dd", days)
+	}
 }
 
 func cmdNew(cfg *config.Config, args []string) error {

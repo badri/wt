@@ -38,8 +38,11 @@ func run() error {
 	args = parseGlobalFlags(args)
 
 	// No args or "list" → list sessions
-	if len(args) == 0 || args[0] == "list" {
-		return cmdList(cfg)
+	if len(args) == 0 {
+		return cmdList(cfg, nil)
+	}
+	if args[0] == "list" {
+		return cmdList(cfg, args[1:])
 	}
 
 	switch args[0] {
