@@ -1,6 +1,11 @@
 # Utility Commands
 
-Diagnostic, integration, and helper commands.
+These are diagnostic and setup commands. Most are for initial setup or troubleshooting—you won't use them during normal hub conversations.
+
+**When you might use these directly:**
+- `wt doctor` — Debugging installation issues
+- `wt completion` — Setting up shell completions (one-time setup)
+- `wt handoff` — Claude runs this when you ask to hand off to a fresh instance
 
 ## Diagnostics
 
