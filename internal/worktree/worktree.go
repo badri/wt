@@ -78,6 +78,31 @@ func checkBranchExists(repoPath, branch string) bool {
 	return cmd.Run() == nil
 }
 
+// SymlinkClaudeDir creates a symlink to the main repo's .claude/ directory in the worktree.
+// This allows workers to inherit project-specific MCP configs, hooks, and settings.
+// If .claude/ doesn't exist in the main repo, or the symlink already exists, this is a no-op.
+func SymlinkClaudeDir(repoPath, worktreePath string) error {
+	srcDir := filepath.Join(repoPath, ".claude")
+	dstDir := filepath.Join(worktreePath, ".claude")
+
+	// Check if source exists
+	if _, err := os.Stat(srcDir); os.IsNotExist(err) {
+		return nil // No .claude/ in main repo, nothing to symlink
+	}
+
+	// Check if destination already exists
+	if _, err := os.Lstat(dstDir); err == nil {
+		return nil // Already exists (symlink or directory)
+	}
+
+	// Create symlink
+	if err := os.Symlink(srcDir, dstDir); err != nil {
+		return fmt.Errorf("creating .claude symlink: %w", err)
+	}
+
+	return nil
+}
+
 // IsBranchMerged checks if a branch has been merged into the target branch (e.g., main).
 // This is used to determine whether a bead should be closed when a session closes.
 func IsBranchMerged(repoPath, branch, targetBranch string) bool {
