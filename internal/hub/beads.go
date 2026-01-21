@@ -172,12 +172,17 @@ func showBead(projectDir, beadID string) (*HubBead, error) {
 		return nil, fmt.Errorf("showing bead %s: %w", beadID, err)
 	}
 
-	var bead HubBead
-	if err := json.Unmarshal(output, &bead); err != nil {
+	// bd show --json returns an array with one element
+	var beads []HubBead
+	if err := json.Unmarshal(output, &beads); err != nil {
 		return nil, fmt.Errorf("parsing bead: %w", err)
 	}
 
-	return &bead, nil
+	if len(beads) == 0 {
+		return nil, fmt.Errorf("bead %s not found", beadID)
+	}
+
+	return &beads[0], nil
 }
 
 // createHandoffBead creates the handoff bead with pinned status

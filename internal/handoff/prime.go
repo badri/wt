@@ -81,13 +81,16 @@ func Prime(cfg *config.Config, opts *PrimeOptions) (*PrimeResult, error) {
 		// Try hub handoff bead first
 		content, err = hub.ReadHandoffBead(cfg)
 		if err != nil {
+			if !opts.Quiet {
+				fmt.Printf("Note: hub bead not available (%v), using file\n", err)
+			}
 			// Fall back to file
 			content, err = GetHandoffContent(cfg)
 		}
 	} else {
 		content, err = GetHandoffContent(cfg)
 	}
-	if err != nil {
+	if err != nil && !opts.Quiet {
 		fmt.Printf("Warning: could not get handoff content: %v\n", err)
 	}
 	result.HandoffContent = content
