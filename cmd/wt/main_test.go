@@ -146,13 +146,14 @@ func TestBuildInitialPrompt(t *testing.T) {
 				MergeMode: "direct",
 			},
 			wantContains: []string{
-				"Push your changes",
 				"wt done",
-				"auto-rebase on main",
+				"Rebases on main",
+				"Pushes your changes",
+				"Closes the bead",
+				"Do NOT run `git push` or `bd close`",
 			},
 			wantNotContains: []string{
 				"wt signal ready",
-				"Do NOT run `wt done`",
 			},
 		},
 		{

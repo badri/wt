@@ -1483,10 +1483,13 @@ func buildInitialPrompt(beadID, title, sessionName string, proj *project.Project
 
 	switch mergeMode {
 	case "direct":
-		sb.WriteString(fmt.Sprintf("%d. Push your changes\n", stepNum))
-		sb.WriteString("\nWhen finished, merge and close:\n")
-		sb.WriteString("  wt done\n")
-		sb.WriteString("\nThis will auto-rebase on main, push, and clean up the worktree.")
+		sb.WriteString(fmt.Sprintf("%d. Run `wt done` to complete\n", stepNum))
+		sb.WriteString("\nIMPORTANT: `wt done` handles everything:\n")
+		sb.WriteString("- Rebases on main\n")
+		sb.WriteString("- Pushes your changes\n")
+		sb.WriteString("- Closes the bead\n")
+		sb.WriteString("- Cleans up the session\n")
+		sb.WriteString("\nDo NOT run `git push` or `bd close` separately.")
 	case "pr-auto":
 		sb.WriteString(fmt.Sprintf("%d. Create a PR with `gh pr create`\n", stepNum))
 		sb.WriteString("\nWhen finished, signal completion with the PR URL:\n")
