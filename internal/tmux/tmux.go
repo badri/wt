@@ -5,8 +5,13 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 )
+
+// nudgeMutex serializes NudgeSession calls to prevent interleaved keystrokes
+// when multiple goroutines try to send messages to sessions simultaneously.
+var nudgeMutex sync.Mutex
 
 // SessionOptions contains optional configuration for creating a tmux session.
 type SessionOptions struct {
@@ -20,51 +25,37 @@ func NewSession(name, workdir, beadsDir, editorCmd string, opts *SessionOptions)
 		return fmt.Errorf("tmux session '%s' already exists", name)
 	}
 
-	// Create tmux session in detached mode
-	// Set BEADS_DIR environment variable and start the editor
-	cmd := exec.Command("tmux", "new-session",
+	// Build command arguments for tmux new-session
+	// Use direct command execution to eliminate send-keys race condition
+	args := []string{
+		"new-session",
 		"-d",       // detached
 		"-s", name, // session name
 		"-c", workdir, // working directory
-	)
-	cmd.Env = append(os.Environ(), fmt.Sprintf("BEADS_DIR=%s", beadsDir))
-
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("creating tmux session: %w", err)
+		"-e", fmt.Sprintf("BEADS_DIR=%s", beadsDir), // environment vars via -e flag
+		"-e", fmt.Sprintf("WT_SESSION=%s", name),
 	}
 
-	// Set BEADS_DIR as an environment variable in the session
-	setEnvCmd := exec.Command("tmux", "set-environment", "-t", name, "BEADS_DIR", beadsDir)
-	if err := setEnvCmd.Run(); err != nil {
-		// Non-fatal, but log it
-		fmt.Printf("Warning: could not set BEADS_DIR in tmux session: %v\n", err)
-	}
-
-	// Set PORT_OFFSET if configured
+	// Add PORT_OFFSET if configured
 	if opts != nil && opts.PortOffset > 0 {
 		portEnv := opts.PortEnv
 		if portEnv == "" {
 			portEnv = "PORT_OFFSET"
 		}
-		setPortCmd := exec.Command("tmux", "set-environment", "-t", name, portEnv, fmt.Sprintf("%d", opts.PortOffset))
-		if err := setPortCmd.Run(); err != nil {
-			fmt.Printf("Warning: could not set %s in tmux session: %v\n", portEnv, err)
-		}
+		args = append(args, "-e", fmt.Sprintf("%s=%d", portEnv, opts.PortOffset))
 	}
 
-	// Set WT_SESSION for commit message traceability
-	setSessionCmd := exec.Command("tmux", "set-environment", "-t", name, "WT_SESSION", name)
-	if err := setSessionCmd.Run(); err != nil {
-		fmt.Printf("Warning: could not set WT_SESSION in tmux session: %v\n", err)
-	}
-
-	// Send the editor command to start
-	// Prefix with space to avoid shell history (requires HISTCONTROL=ignorespace or setopt HIST_IGNORE_SPACE)
+	// If editorCmd is provided, run it directly as the pane process
+	// This eliminates the race condition where send-keys might arrive before shell is ready
 	if editorCmd != "" {
-		sendCmd := exec.Command("tmux", "send-keys", "-t", name, " "+editorCmd, "Enter")
-		if err := sendCmd.Run(); err != nil {
-			return fmt.Errorf("starting editor: %w", err)
-		}
+		args = append(args, editorCmd)
+	}
+
+	cmd := exec.Command("tmux", args...)
+	cmd.Env = os.Environ()
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("creating tmux session: %w", err)
 	}
 
 	return nil
@@ -79,23 +70,20 @@ func NewSeanceSession(name, workdir, editorCmd, claudeSessionID string, switchTo
 		return fmt.Errorf("tmux session '%s' already exists", name)
 	}
 
-	// Create tmux session in detached mode
+	// Build the full resume command
+	resumeCmd := fmt.Sprintf("%s --resume %s", editorCmd, claudeSessionID)
+
+	// Create tmux session with command running directly as the pane process
+	// This eliminates the send-keys race condition
 	cmd := exec.Command("tmux", "new-session",
 		"-d",       // detached
 		"-s", name, // session name
 		"-c", workdir, // working directory
+		resumeCmd, // run command directly
 	)
 
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("creating tmux session: %w", err)
-	}
-
-	// Send the claude --resume command using the configured editor
-	// Prefix with space to avoid shell history
-	resumeCmd := fmt.Sprintf(" %s --resume %s", editorCmd, claudeSessionID)
-	sendCmd := exec.Command("tmux", "send-keys", "-t", name, resumeCmd, "Enter")
-	if err := sendCmd.Run(); err != nil {
-		return fmt.Errorf("starting claude resume: %w", err)
 	}
 
 	// Switch to the session if requested
@@ -135,7 +123,12 @@ func SwitchClient(name string) error {
 
 // NudgeSession sends a message to a tmux session with reliable delivery.
 // Uses literal mode for text, debounce delay, and retry logic for Enter.
+// Serialized via mutex to prevent interleaved keystrokes from concurrent calls.
 func NudgeSession(session, message string) error {
+	// Serialize access to prevent concurrent nudges from interleaving
+	nudgeMutex.Lock()
+	defer nudgeMutex.Unlock()
+
 	// 1. Send text in literal mode (handles special characters)
 	sendCmd := exec.Command("tmux", "send-keys", "-t", session, "-l", message)
 	if err := sendCmd.Run(); err != nil {
@@ -152,7 +145,7 @@ func NudgeSession(session, message string) error {
 
 	// 4. Send Enter with retry (critical for message submission)
 	var lastErr error
-	for attempt := 0; attempt < 3; attempt++ {
+	for attempt := range 3 {
 		if attempt > 0 {
 			time.Sleep(200 * time.Millisecond)
 		}
