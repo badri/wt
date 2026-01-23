@@ -69,7 +69,7 @@ func TestManager_Add(t *testing.T) {
 	repoDir := setupTestRepo(t)
 	mgr := NewManager(cfg)
 
-	proj, err := mgr.Add("myproject", repoDir)
+	proj, err := mgr.Add("myproject", repoDir, nil)
 	if err != nil {
 		t.Fatalf("Add failed: %v", err)
 	}
@@ -93,8 +93,8 @@ func TestManager_Add_DuplicateError(t *testing.T) {
 	repoDir := setupTestRepo(t)
 	mgr := NewManager(cfg)
 
-	mgr.Add("myproject", repoDir)
-	_, err := mgr.Add("myproject", repoDir)
+	mgr.Add("myproject", repoDir, nil)
+	_, err := mgr.Add("myproject", repoDir, nil)
 
 	if err == nil {
 		t.Error("expected error for duplicate project")
@@ -105,7 +105,7 @@ func TestManager_Add_InvalidPath(t *testing.T) {
 	cfg, _ := setupTestConfig(t)
 	mgr := NewManager(cfg)
 
-	_, err := mgr.Add("myproject", "/nonexistent/path")
+	_, err := mgr.Add("myproject", "/nonexistent/path", nil)
 	if err == nil {
 		t.Error("expected error for invalid path")
 	}
@@ -118,7 +118,7 @@ func TestManager_Add_NotGitRepo(t *testing.T) {
 	// Create a directory that's not a git repo
 	notGitDir := t.TempDir()
 
-	_, err := mgr.Add("myproject", notGitDir)
+	_, err := mgr.Add("myproject", notGitDir, nil)
 	if err == nil {
 		t.Error("expected error for non-git directory")
 	}
@@ -129,7 +129,7 @@ func TestManager_Get(t *testing.T) {
 	repoDir := setupTestRepo(t)
 	mgr := NewManager(cfg)
 
-	mgr.Add("myproject", repoDir)
+	mgr.Add("myproject", repoDir, nil)
 
 	proj, err := mgr.Get("myproject")
 	if err != nil {
@@ -157,8 +157,8 @@ func TestManager_List(t *testing.T) {
 	repoDir2 := setupTestRepo(t)
 	mgr := NewManager(cfg)
 
-	mgr.Add("project1", repoDir1)
-	mgr.Add("project2", repoDir2)
+	mgr.Add("project1", repoDir1, nil)
+	mgr.Add("project2", repoDir2, nil)
 
 	projects, err := mgr.List()
 	if err != nil {
@@ -175,7 +175,7 @@ func TestManager_Delete(t *testing.T) {
 	repoDir := setupTestRepo(t)
 	mgr := NewManager(cfg)
 
-	mgr.Add("myproject", repoDir)
+	mgr.Add("myproject", repoDir, nil)
 
 	err := mgr.Delete("myproject")
 	if err != nil {
@@ -203,7 +203,7 @@ func TestManager_FindByBeadPrefix(t *testing.T) {
 	repoDir := setupTestRepo(t)
 	mgr := NewManager(cfg)
 
-	mgr.Add("myproject", repoDir)
+	mgr.Add("myproject", repoDir, nil)
 
 	// Test with bead ID
 	proj, err := mgr.FindByBeadPrefix("myproject-abc")
@@ -268,5 +268,103 @@ func TestExtractPrefix(t *testing.T) {
 		if result != tt.expected {
 			t.Errorf("extractPrefix(%q) = %q, want %q", tt.beadID, result, tt.expected)
 		}
+	}
+}
+
+func TestManager_Add_WithBranch(t *testing.T) {
+	cfg, _ := setupTestConfig(t)
+	repoDir := setupTestRepo(t)
+	mgr := NewManager(cfg)
+
+	opts := &AddOptions{Branch: "feature/v2"}
+	proj, err := mgr.Add("myproject", repoDir, opts)
+	if err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+
+	if proj.DefaultBranch != "feature/v2" {
+		t.Errorf("expected branch 'feature/v2', got %q", proj.DefaultBranch)
+	}
+}
+
+func TestManager_Add_MultipleBranches(t *testing.T) {
+	cfg, _ := setupTestConfig(t)
+	repoDir := setupTestRepo(t)
+
+	// Add remote URL to test repo
+	cmd := exec.Command("git", "-C", repoDir, "remote", "add", "origin", "git@github.com:test/repo.git")
+	cmd.Run()
+
+	mgr := NewManager(cfg)
+
+	// First registration with main branch
+	proj1, err := mgr.Add("myproject", repoDir, &AddOptions{Branch: "main"})
+	if err != nil {
+		t.Fatalf("Add main branch failed: %v", err)
+	}
+	if proj1.RepoURL != "git@github.com:test/repo.git" {
+		t.Errorf("expected RepoURL to be set, got %q", proj1.RepoURL)
+	}
+
+	// Second registration with feature branch (same repo, different branch)
+	proj2, err := mgr.Add("myproject-feature", repoDir, &AddOptions{Branch: "feature/v2"})
+	if err != nil {
+		t.Fatalf("Add feature branch failed: %v", err)
+	}
+	if proj2.DefaultBranch != "feature/v2" {
+		t.Errorf("expected branch 'feature/v2', got %q", proj2.DefaultBranch)
+	}
+
+	// Both should share the same beads prefix
+	if proj1.BeadsPrefix != proj2.BeadsPrefix {
+		t.Errorf("expected same beads prefix, got %q and %q", proj1.BeadsPrefix, proj2.BeadsPrefix)
+	}
+}
+
+func TestManager_Add_SameRepoBranchConflict(t *testing.T) {
+	cfg, _ := setupTestConfig(t)
+	repoDir := setupTestRepo(t)
+
+	// Add remote URL to test repo
+	cmd := exec.Command("git", "-C", repoDir, "remote", "add", "origin", "git@github.com:test/repo.git")
+	cmd.Run()
+
+	mgr := NewManager(cfg)
+
+	// First registration
+	_, err := mgr.Add("myproject", repoDir, &AddOptions{Branch: "main"})
+	if err != nil {
+		t.Fatalf("Add first project failed: %v", err)
+	}
+
+	// Second registration with same branch should fail
+	_, err = mgr.Add("myproject2", repoDir, &AddOptions{Branch: "main"})
+	if err == nil {
+		t.Error("expected error when registering same repo with same branch")
+	}
+}
+
+func TestManager_FindByRepoURL(t *testing.T) {
+	cfg, _ := setupTestConfig(t)
+	repoDir := setupTestRepo(t)
+
+	// Add remote URL to test repo
+	cmd := exec.Command("git", "-C", repoDir, "remote", "add", "origin", "git@github.com:test/repo.git")
+	cmd.Run()
+
+	mgr := NewManager(cfg)
+
+	// Register two projects for same repo
+	mgr.Add("proj-main", repoDir, &AddOptions{Branch: "main"})
+	mgr.Add("proj-feature", repoDir, &AddOptions{Branch: "feature"})
+
+	// Find all projects for this repo
+	matches, err := mgr.FindByRepoURL("git@github.com:test/repo.git")
+	if err != nil {
+		t.Fatalf("FindByRepoURL failed: %v", err)
+	}
+
+	if len(matches) != 2 {
+		t.Errorf("expected 2 matches, got %d", len(matches))
 	}
 }
