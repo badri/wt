@@ -270,11 +270,29 @@ func (r *Runner) createSession(beadID string) (string, error) {
 
 // runClaudeInSession runs claude in a tmux session and waits for completion
 func (r *Runner) runClaudeInSession(sessionName, command, prompt string, timeout time.Duration) (string, error) {
-	// Send command to tmux session
-	// Prefix with space to avoid shell history
-	fullCmd := fmt.Sprintf(" %s -p %q", command, prompt)
+	// Write prompt to a temp file to avoid send-keys issues with long prompts.
+	// Using send-keys with long/complex prompts can cause the text to appear
+	// twice in the input buffer (once executed, once echoed without Enter).
+	promptFile, err := os.CreateTemp("", "wt-auto-prompt-*.txt")
+	if err != nil {
+		return "failed-create-prompt", fmt.Errorf("creating temp prompt file: %w", err)
+	}
+	promptPath := promptFile.Name()
+
+	if _, err := promptFile.WriteString(prompt); err != nil {
+		promptFile.Close()
+		os.Remove(promptPath)
+		return "failed-write-prompt", fmt.Errorf("writing prompt to temp file: %w", err)
+	}
+	promptFile.Close()
+
+	// Send command to tmux session using the prompt file.
+	// Use cat with command substitution to read the prompt, then delete the temp file.
+	// Prefix with space to avoid shell history.
+	fullCmd := fmt.Sprintf(" %s -p \"$(cat %q)\" && rm -f %q", command, promptPath, promptPath)
 	tmuxCmd := exec.Command("tmux", "send-keys", "-t", sessionName, fullCmd, "Enter")
 	if err := tmuxCmd.Run(); err != nil {
+		os.Remove(promptPath) // Clean up on error
 		return "failed-send", fmt.Errorf("sending command to tmux: %w", err)
 	}
 
