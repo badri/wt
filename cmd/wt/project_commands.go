@@ -29,12 +29,27 @@ COMMANDS:
 OPTIONS:
     -h, --help          Show this help
 
+ADD OPTIONS:
+    --branch, -b <branch>  Target branch for this project (default: main)
+                           Worktrees are created from and merged back to this branch
+
 EXAMPLES:
-    wt project                      List all projects
-    wt project list                 Same as above
-    wt project add myproj ~/code/myproj    Register project
-    wt project config myproj        Edit myproj's configuration
-    wt project remove myproj        Unregister myproj
+    wt project                                       List all projects
+    wt project list                                  Same as above
+    wt project add myproj ~/code/myproj              Register project (uses main branch)
+    wt project add myproj-feature ~/code/myproj --branch feature/v2
+                                                     Register same repo with different branch
+    wt project config myproj                         Edit myproj's configuration
+    wt project remove myproj                         Unregister myproj
+
+MULTI-BRANCH WORKFLOWS:
+    Register the same repo with different branches to work on feature branches:
+
+    wt project add myproj ~/code/myproj --branch main
+    wt project add myproj-v2 ~/code/myproj --branch feature/v2
+
+    Worktrees for 'myproj' will branch from and merge to 'main'.
+    Worktrees for 'myproj-v2' will branch from and merge to 'feature/v2'.
 
 SEE ALSO:
     wt ready [project]     Show beads ready to work on
@@ -59,9 +74,13 @@ func cmdProject(cfg *config.Config, args []string) error {
 	switch args[0] {
 	case "add":
 		if len(args) < 3 {
-			return fmt.Errorf("usage: wt project add <name> <path>")
+			return fmt.Errorf("usage: wt project add <name> <path> [--branch <branch>]")
 		}
-		return cmdProjectAdd(mgr, args[1], args[2])
+		name, path, flags := parseProjectAddFlags(args[1:])
+		if name == "" || path == "" {
+			return fmt.Errorf("usage: wt project add <name> <path> [--branch <branch>]")
+		}
+		return cmdProjectAdd(mgr, name, path, flags)
 	case "config":
 		if len(args) < 2 {
 			return fmt.Errorf("usage: wt project config <name>")
@@ -77,14 +96,54 @@ func cmdProject(cfg *config.Config, args []string) error {
 	}
 }
 
-func cmdProjectAdd(mgr *project.Manager, name, path string) error {
-	proj, err := mgr.Add(name, path)
+type projectAddFlags struct {
+	branch string
+}
+
+func parseProjectAddFlags(args []string) (string, string, projectAddFlags) {
+	var name, path string
+	var flags projectAddFlags
+
+	// Parse positional args and flags
+	positional := []string{}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--branch", "-b":
+			if i+1 < len(args) {
+				flags.branch = args[i+1]
+				i++
+			}
+		default:
+			positional = append(positional, args[i])
+		}
+	}
+
+	if len(positional) >= 1 {
+		name = positional[0]
+	}
+	if len(positional) >= 2 {
+		path = positional[1]
+	}
+
+	return name, path, flags
+}
+
+func cmdProjectAdd(mgr *project.Manager, name, path string, flags projectAddFlags) error {
+	opts := &project.AddOptions{
+		Branch: flags.branch,
+	}
+
+	proj, err := mgr.Add(name, path, opts)
 	if err != nil {
 		return err
 	}
 
 	fmt.Printf("Project '%s' registered.\n", proj.Name)
 	fmt.Printf("  Repo:         %s\n", proj.Repo)
+	if proj.RepoURL != "" {
+		fmt.Printf("  Remote:       %s\n", proj.RepoURL)
+	}
+	fmt.Printf("  Branch:       %s\n", proj.DefaultBranch)
 	fmt.Printf("  Beads prefix: %s\n", proj.BeadsPrefix)
 	fmt.Printf("  Merge mode:   %s (default)\n", proj.MergeMode)
 	fmt.Printf("\nConfigure with: wt project config %s\n", proj.Name)

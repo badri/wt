@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -13,8 +14,9 @@ import (
 // Project represents a registered project configuration.
 type Project struct {
 	Name          string   `json:"name"`
-	Repo          string   `json:"repo"`
-	DefaultBranch string   `json:"default_branch,omitempty"`
+	Repo          string   `json:"repo"`                     // Local path to the repository (may include ~)
+	RepoURL       string   `json:"repo_url,omitempty"`       // Canonical git remote URL for repo identity
+	DefaultBranch string   `json:"default_branch,omitempty"` // Branch to create worktrees from and merge back to
 	BeadsPrefix   string   `json:"beads_prefix,omitempty"`
 	MergeMode     string   `json:"merge_mode,omitempty"`
 	RequireCI     bool     `json:"require_ci,omitempty"`
@@ -111,8 +113,13 @@ func (m *Manager) Get(name string) (*Project, error) {
 	return &proj, nil
 }
 
+// AddOptions contains optional parameters for project registration.
+type AddOptions struct {
+	Branch string // Target branch (defaults to "main")
+}
+
 // Add registers a new project.
-func (m *Manager) Add(name, repoPath string) (*Project, error) {
+func (m *Manager) Add(name, repoPath string, opts *AddOptions) (*Project, error) {
 	if err := m.EnsureProjectsDir(); err != nil {
 		return nil, err
 	}
@@ -134,11 +141,42 @@ func (m *Manager) Add(name, repoPath string) (*Project, error) {
 		return nil, fmt.Errorf("not a git repository: %s", expandedPath)
 	}
 
+	// Determine branch
+	branch := "main"
+	if opts != nil && opts.Branch != "" {
+		branch = opts.Branch
+	}
+
+	// Get git remote URL for canonical repo identity
+	repoURL := getGitRemoteURL(expandedPath)
+
+	// Auto-discover beads prefix from .beads/config.json if available
+	beadsPrefix := discoverBeadsPrefix(expandedPath)
+	if beadsPrefix == "" {
+		beadsPrefix = name
+	}
+
+	// Check for existing registrations of this repo
+	if repoURL != "" {
+		existingProjects, _ := m.FindByRepoURL(repoURL)
+
+		// If repo is already registered, inherit the beads prefix from existing registration
+		if len(existingProjects) > 0 {
+			beadsPrefix = existingProjects[0].BeadsPrefix
+		}
+
+		// Validate: check for conflicts with existing projects
+		if err := m.validateRepoRegistration(repoURL, branch, beadsPrefix); err != nil {
+			return nil, err
+		}
+	}
+
 	proj := &Project{
 		Name:          name,
 		Repo:          repoPath, // Store original path (may include ~)
-		DefaultBranch: "main",
-		BeadsPrefix:   name,
+		RepoURL:       repoURL,
+		DefaultBranch: branch,
+		BeadsPrefix:   beadsPrefix,
 		MergeMode:     "pr-review",
 	}
 
@@ -226,4 +264,82 @@ func extractPrefix(beadID string) string {
 		return strings.Join(parts[:len(parts)-1], "-")
 	}
 	return beadID
+}
+
+// getGitRemoteURL gets the origin remote URL from a git repository.
+func getGitRemoteURL(repoPath string) string {
+	cmd := exec.Command("git", "-C", repoPath, "remote", "get-url", "origin")
+	output, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(output))
+}
+
+// discoverBeadsPrefix reads the beads prefix from .beads/config.json if it exists.
+func discoverBeadsPrefix(repoPath string) string {
+	configPath := filepath.Join(repoPath, ".beads", "config.json")
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return ""
+	}
+
+	var config struct {
+		Prefix string `json:"prefix"`
+	}
+	if err := json.Unmarshal(data, &config); err != nil {
+		return ""
+	}
+
+	return config.Prefix
+}
+
+// validateRepoRegistration checks for conflicts when registering a repo.
+// It ensures:
+// - Same repo with same branch cannot be registered twice (use existing project)
+// - Same repo with different branch must have matching beads_prefix
+func (m *Manager) validateRepoRegistration(repoURL, branch, beadsPrefix string) error {
+	projects, err := m.List()
+	if err != nil {
+		return nil // Can't validate, proceed anyway
+	}
+
+	for _, existing := range projects {
+		if existing.RepoURL != repoURL {
+			continue
+		}
+
+		// Same repo found
+		if existing.DefaultBranch == branch {
+			return fmt.Errorf("repo already registered as project '%s' with branch '%s'. Use that project or choose a different branch", existing.Name, branch)
+		}
+
+		// Same repo, different branch - ensure beads prefix matches
+		if existing.BeadsPrefix != beadsPrefix {
+			return fmt.Errorf("repo already registered with beads prefix '%s' (project '%s'). All registrations of the same repo must share the same beads prefix", existing.BeadsPrefix, existing.Name)
+		}
+	}
+
+	return nil
+}
+
+// FindByRepoURL finds all projects registered for a given repo URL.
+func (m *Manager) FindByRepoURL(repoURL string) ([]*Project, error) {
+	if repoURL == "" {
+		return nil, nil
+	}
+
+	projects, err := m.List()
+	if err != nil {
+		return nil, err
+	}
+
+	var matches []*Project
+	for _, proj := range projects {
+		if proj.RepoURL == repoURL {
+			matches = append(matches, proj)
+		}
+	}
+
+	return matches, nil
 }

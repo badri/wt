@@ -24,6 +24,7 @@ import (
 type newFlags struct {
 	repo        string
 	name        string
+	project     string // Explicit project to use (for multi-branch repos)
 	noSwitch    bool
 	forceSwitch bool
 	noTestEnv   bool
@@ -46,6 +47,8 @@ ARGUMENTS:
 OPTIONS:
     --repo <path>       Use specific repository path (default: auto-detect from bead)
     --name <name>       Custom session name (default: generated from namepool)
+    -p, --project <name>  Use specific project (required when repo has multiple
+                        branch registrations with same bead prefix)
     --no-switch         Don't switch to the new session after creation
     --switch            Force switch even when running from hub
     --no-test-env       Skip test environment setup
@@ -56,6 +59,7 @@ EXAMPLES:
     wt new wt-123 --name mybranch     Use custom session name
     wt new wt-123 --no-switch         Create but stay in current session
     wt new proj-456 --repo ~/code/proj  Specify repo path
+    wt new proj-456 -p proj-feature   Use project with specific branch config
 `
 	fmt.Print(help)
 	return nil
@@ -73,6 +77,11 @@ func parseNewFlags(args []string) (beadID string, flags newFlags) {
 		case "--name":
 			if i+1 < len(args) {
 				flags.name = args[i+1]
+				i++
+			}
+		case "-p", "--project":
+			if i+1 < len(args) {
+				flags.project = args[i+1]
 				i++
 			}
 		case "--no-switch":
@@ -530,8 +539,30 @@ func cmdNew(cfg *config.Config, args []string) error {
 	var proj *project.Project
 	mgr := project.NewManager(cfg)
 
-	// Always try to find project by bead prefix (needed for merge mode, test env, etc.)
-	proj, _ = mgr.FindByBeadPrefix(beadID)
+	// If explicit project specified, use it
+	if flags.project != "" {
+		var err error
+		proj, err = mgr.Get(flags.project)
+		if err != nil {
+			return fmt.Errorf("project '%s' not found", flags.project)
+		}
+	} else {
+		// Try to find project by bead prefix
+		proj, _ = mgr.FindByBeadPrefix(beadID)
+
+		// Check for multiple projects with same bead prefix (multi-branch repos)
+		if proj != nil && proj.RepoURL != "" {
+			matches, _ := mgr.FindByRepoURL(proj.RepoURL)
+			if len(matches) > 1 {
+				var projectNames []string
+				for _, m := range matches {
+					projectNames = append(projectNames, fmt.Sprintf("  %s (branch: %s)", m.Name, m.DefaultBranch))
+				}
+				return fmt.Errorf("multiple projects share bead prefix '%s'. Use -p <project> to specify:\n%s",
+					proj.BeadsPrefix, strings.Join(projectNames, "\n"))
+			}
+		}
+	}
 
 	if repoPath == "" {
 		if proj != nil {
@@ -595,8 +626,19 @@ func cmdNew(cfg *config.Config, args []string) error {
 	// Create worktree using bead ID to guarantee unique paths
 	worktreePath := cfg.WorktreePath(beadID)
 	fmt.Printf("Creating git worktree at %s...\n", worktreePath)
-	if err := worktree.Create(repoPath, worktreePath, beadID); err != nil {
+
+	// Determine base branch for worktree creation
+	baseBranch := "main"
+	if proj != nil && proj.DefaultBranch != "" {
+		baseBranch = proj.DefaultBranch
+	}
+
+	// Create worktree from the project's base branch
+	if err := worktree.CreateFromBranch(repoPath, worktreePath, beadID, baseBranch); err != nil {
 		return fmt.Errorf("creating worktree: %w", err)
+	}
+	if baseBranch != "main" {
+		fmt.Printf("  Created from branch: %s\n", baseBranch)
 	}
 
 	// Symlink .claude/ from main repo for project-specific configs (MCP servers, hooks, settings)
