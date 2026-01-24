@@ -324,19 +324,24 @@ Shows: name, repo path, merge mode, active session count
 
 ### Registering Projects
 
-When a user asks to register a project, **always ask about the merge mode** before completing registration:
+When a user asks to register a project, **always ask about the branch and merge mode** before completing registration:
 
-1. Ask the user which merge mode they prefer:
-   - `direct` - Merge directly to main, no PR (fast, for solo work)
+1. Ask the user which **branch** this project registration is for:
+   - Default is `main`
+   - For feature branch workflows, register the same repo multiple times with different branches
+   - Example: `myapp` (main) and `myapp-feature-auth` (feature/auth branch)
+
+2. Ask the user which **merge mode** they prefer:
+   - `direct` - Merge directly to target branch, no PR (fast, for solo work)
    - `pr-auto` - Create PR, auto-merge when CI passes (balanced)
    - `pr-review` - Create PR, wait for human review (default, safest)
 
-2. Register the project:
+3. Register the project:
    ```bash
-   wt project add <name> <path>
+   wt project add <name> <path> --branch <branch>
    ```
 
-3. Configure the merge mode:
+4. Configure merge mode if needed:
    ```bash
    wt project config <name>    # Opens in $EDITOR, set merge_mode
    ```
@@ -344,13 +349,41 @@ When a user asks to register a project, **always ask about the merge mode** befo
 **Example conversation:**
 ```
 User: "Register ~/code/myapp"
-You: "I'll register that. How should completed work be merged?
-      - direct: Merge directly to main (no PR)
-      - pr-auto: Create PR, auto-merge when CI passes
-      - pr-review: Create PR, wait for human review"
-User: "pr-auto"
-You: [register project and set merge_mode to pr-auto]
+You: "I'll register that. A few questions:
+      1. Which branch should workers use? (default: main)
+      2. How should completed work be merged?
+         - direct: Merge directly (no PR)
+         - pr-auto: Create PR, auto-merge when CI passes
+         - pr-review: Create PR, wait for human review"
+User: "main branch, pr-auto"
+You: [register project with branch=main, merge_mode=pr-auto]
 ```
+
+**Feature branch workflow:**
+```
+User: "Register ~/code/myapp for the feature/auth branch"
+You: "I'll register that as a separate project for the feature branch.
+      What name for this registration? (suggestion: myapp-auth)"
+User: "myapp-auth"
+You: [register myapp-auth with branch=feature/auth]
+```
+
+**Project config schema:**
+```json
+{
+  "name": "myapp",
+  "repo": "~/code/myapp",
+  "repo_url": "git@github.com:user/myapp.git",
+  "default_branch": "main",
+  "beads_prefix": "myapp",
+  "merge_mode": "pr-review"
+}
+```
+
+**Key fields:**
+- `repo_url` - Canonical git remote URL (auto-discovered)
+- `default_branch` - Branch to create worktrees from and merge back to
+- `beads_prefix` - Shared across all registrations of the same repo
 
 ### Configuring Projects
 
@@ -913,21 +946,54 @@ When the hub session compacts or restarts:
 
 ### The Solution: wt handoff
 
-**From hub session:**
+**IMPORTANT: When user requests handoff (or you detect context limit), you MUST:**
+
+1. **Summarize the conversation first** - Create a concise summary including:
+   - What was accomplished this session
+   - Key decisions made and why
+   - Current state of work (what's done, what's pending)
+   - Any blockers or issues discovered
+   - Recommended next steps
+
+2. **Call wt handoff with the summary**:
+   ```bash
+   wt handoff -m "SUMMARY:
+   - Accomplished: [list what was done]
+   - Decisions: [key decisions and rationale]
+   - Current state: [where things stand]
+   - Next steps: [what should happen next]
+   - Notes: [anything the next session should know]"
+   ```
+
+3. **The new session will**:
+   - Receive a prompt to read `~/.config/wt/handoff.md`
+   - Have full context of what happened
+   - Continue where you left off
+
+**Trigger conditions for handoff:**
+- User explicitly asks for handoff
+- You notice context is getting long/compacted
+- Before a major context switch
+- End of a work session
+
+**Example handoff:**
 ```bash
-wt handoff                  # Cycle to fresh Claude, preserve context
-wt handoff -m "notes"       # Include custom message
-wt handoff -c               # Auto-collect state (sessions, ready beads)
-wt handoff --dry-run        # Preview what would be collected
+wt handoff -m "SUMMARY:
+- Accomplished: Fixed handoff respawn bug (wt-rcj), context now passes to new session
+- Decisions: Used session name detection instead of WT_HUB env var for reliability
+- Current state: Code committed and pushed, tests passing
+- Next steps: Test handoff end-to-end, then implement /handoff skill integration
+- Notes: Watch pane was restored manually after debugging"
 ```
 
-**What happens:**
+**What happens internally:**
 1. Collects context (active sessions, ready beads, in-progress work)
-2. Stores in "Hub Handoff" bead (persists in beads)
-3. Logs hub session for seance (can resume via `wt seance hub`)
-4. Writes handoff marker file
-5. Clears tmux history
-6. Respawns fresh Claude via `tmux respawn-pane`
+2. Writes your summary + auto-collected context to `~/.config/wt/handoff.md`
+3. Stores in "Hub Handoff" bead (persists in beads)
+4. Logs hub session for seance (can resume via `wt seance hub`)
+5. Writes handoff marker file
+6. Clears tmux history
+7. Respawns fresh Claude via `tmux respawn-pane`
 
 ### Startup: wt prime
 
