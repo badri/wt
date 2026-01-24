@@ -576,9 +576,9 @@ func cmdNew(cfg *config.Config, args []string) error {
 		}
 	}
 
-	// Validate bead exists (using project's beads directory if known)
+	// Validate bead exists and get full info (using project's beads directory if known)
 	beadsDir := repoPath + "/.beads"
-	beadInfo, err := bead.ShowInDir(beadID, beadsDir)
+	beadInfo, err := bead.ShowFullInDir(beadID, beadsDir)
 	if err != nil {
 		return fmt.Errorf("bead not found: %s", beadID)
 	}
@@ -751,7 +751,7 @@ func cmdNew(cfg *config.Config, args []string) error {
 
 	// Send initial work prompt using reliable nudge pattern
 	fmt.Println("Sending initial prompt to worker...")
-	prompt := buildInitialPrompt(beadID, beadInfo.Title, sessionName, proj)
+	prompt := buildInitialPrompt(beadID, beadInfo.Title, beadInfo.Description, sessionName, proj)
 	if err := tmux.NudgeSession(sessionName, prompt); err != nil {
 		fmt.Printf("Warning: could not send initial prompt: %v\n", err)
 	}
@@ -1499,11 +1499,17 @@ func getClaudeSessionID(worktreePath string) string {
 }
 
 // buildInitialPrompt creates the prompt to send to Claude when starting work on a bead
-func buildInitialPrompt(beadID, title, sessionName string, proj *project.Project) string {
+func buildInitialPrompt(beadID, title, description, sessionName string, proj *project.Project) string {
 	var sb strings.Builder
 
-	// Main task
+	// Main task with bead ID and title
 	sb.WriteString(fmt.Sprintf("Work on bead %s: %s.\n\n", beadID, title))
+
+	// Include bead description if available
+	if description != "" {
+		sb.WriteString(description)
+		sb.WriteString("\n\n")
+	}
 
 	// Workflow instructions
 	sb.WriteString("Workflow:\n")
