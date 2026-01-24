@@ -362,7 +362,22 @@ type BeadInfoFull struct {
 
 // ShowFull returns full bead information including description
 func ShowFull(beadID string) (*BeadInfoFull, error) {
+	return ShowFullInDir(beadID, "")
+}
+
+// ShowFullInDir returns full bead info from a specific beads directory
+func ShowFullInDir(beadID, beadsDir string) (*BeadInfoFull, error) {
+	// Determine project directory
+	projectDir := ""
+	if beadsDir != "" {
+		projectDir = strings.TrimSuffix(beadsDir, "/.beads")
+		projectDir = strings.TrimSuffix(projectDir, ".beads")
+	}
+
 	cmd := exec.Command("bd", "show", beadID, "--json")
+	if projectDir != "" {
+		cmd.Dir = projectDir
+	}
 	output, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("showing bead: %w", err)

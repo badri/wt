@@ -122,28 +122,50 @@ func SwitchClient(name string) error {
 }
 
 // NudgeSession sends a message to a tmux session with reliable delivery.
-// Uses literal mode for text, debounce delay, and retry logic for Enter.
+// Uses a temp file and tmux paste buffer to avoid double-pasting issues with send-keys.
 // Serialized via mutex to prevent interleaved keystrokes from concurrent calls.
 func NudgeSession(session, message string) error {
 	// Serialize access to prevent concurrent nudges from interleaving
 	nudgeMutex.Lock()
 	defer nudgeMutex.Unlock()
 
-	// 1. Send text in literal mode (handles special characters)
-	sendCmd := exec.Command("tmux", "send-keys", "-t", session, "-l", message)
-	if err := sendCmd.Run(); err != nil {
-		return fmt.Errorf("sending message: %w", err)
+	// 1. Write message to a temp file to avoid send-keys double-paste issues.
+	// Using send-keys with long/complex prompts can cause the text to appear
+	// twice in the input buffer (once executed, once echoed without Enter).
+	tmpFile, err := os.CreateTemp("", "wt-nudge-*.txt")
+	if err != nil {
+		return fmt.Errorf("creating temp file: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+	defer os.Remove(tmpPath)
+
+	if _, err := tmpFile.WriteString(message); err != nil {
+		tmpFile.Close()
+		return fmt.Errorf("writing to temp file: %w", err)
+	}
+	tmpFile.Close()
+
+	// 2. Load the temp file into tmux's paste buffer
+	loadCmd := exec.Command("tmux", "load-buffer", tmpPath)
+	if err := loadCmd.Run(); err != nil {
+		return fmt.Errorf("loading buffer: %w", err)
 	}
 
-	// 2. Wait 500ms for paste to complete
+	// 3. Paste the buffer into the session
+	pasteCmd := exec.Command("tmux", "paste-buffer", "-t", session)
+	if err := pasteCmd.Run(); err != nil {
+		return fmt.Errorf("pasting buffer: %w", err)
+	}
+
+	// 4. Wait for paste to complete
 	time.Sleep(500 * time.Millisecond)
 
-	// 3. Send Escape to exit vim INSERT mode if enabled (harmless in normal mode)
+	// 5. Send Escape to exit vim INSERT mode if enabled (harmless in normal mode)
 	escCmd := exec.Command("tmux", "send-keys", "-t", session, "Escape")
 	_ = escCmd.Run()
 	time.Sleep(100 * time.Millisecond)
 
-	// 4. Send Enter with retry (critical for message submission)
+	// 6. Send Enter with retry (critical for message submission)
 	var lastErr error
 	for attempt := range 3 {
 		if attempt > 0 {

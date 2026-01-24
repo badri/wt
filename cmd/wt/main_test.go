@@ -94,6 +94,7 @@ func TestBuildInitialPrompt(t *testing.T) {
 		name            string
 		beadID          string
 		title           string
+		description     string
 		sessionName     string
 		proj            *project.Project
 		wantContains    []string
@@ -103,6 +104,7 @@ func TestBuildInitialPrompt(t *testing.T) {
 			name:        "no project - defaults to pr-review",
 			beadID:      "test-123",
 			title:       "Fix the bug",
+			description: "",
 			sessionName: "wt-po",
 			proj:        nil,
 			wantContains: []string{
@@ -123,6 +125,7 @@ func TestBuildInitialPrompt(t *testing.T) {
 			name:        "project with pr-review mode",
 			beadID:      "test-456",
 			title:       "Add feature",
+			description: "",
 			sessionName: "wt-tigress",
 			proj: &project.Project{
 				MergeMode: "pr-review",
@@ -141,6 +144,7 @@ func TestBuildInitialPrompt(t *testing.T) {
 			name:        "project with direct mode",
 			beadID:      "test-789",
 			title:       "Quick fix",
+			description: "",
 			sessionName: "wt-crane",
 			proj: &project.Project{
 				MergeMode: "direct",
@@ -160,6 +164,7 @@ func TestBuildInitialPrompt(t *testing.T) {
 			name:        "project with pr-auto mode",
 			beadID:      "test-abc",
 			title:       "Auto merge feature",
+			description: "",
 			sessionName: "wt-viper",
 			proj: &project.Project{
 				MergeMode: "pr-auto",
@@ -175,6 +180,7 @@ func TestBuildInitialPrompt(t *testing.T) {
 			name:        "project with test env",
 			beadID:      "test-def",
 			title:       "Tested feature",
+			description: "",
 			sessionName: "wt-mantis",
 			proj: &project.Project{
 				MergeMode: "pr-review",
@@ -186,11 +192,24 @@ func TestBuildInitialPrompt(t *testing.T) {
 				"Run tests and fix any failures",
 			},
 		},
+		{
+			name:        "bead with description",
+			beadID:      "test-ghi",
+			title:       "Complex feature",
+			description: "This is a detailed description of the task.\n\nIt includes multiple lines.",
+			sessionName: "wt-falcon",
+			proj:        nil,
+			wantContains: []string{
+				"Work on bead test-ghi: Complex feature.",
+				"This is a detailed description of the task.",
+				"It includes multiple lines.",
+			},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := buildInitialPrompt(tt.beadID, tt.title, tt.sessionName, tt.proj)
+			result := buildInitialPrompt(tt.beadID, tt.title, tt.description, tt.sessionName, tt.proj)
 
 			for _, want := range tt.wantContains {
 				if !contains(result, want) {
