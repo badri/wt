@@ -333,24 +333,30 @@ func respawnClaude(cfg *config.Config) error {
 		editorCmd = "claude"
 	}
 
+	// Check if we're in hub session by tmux session name (more reliable than WT_HUB env)
+	// because WT_HUB can get lost if respawn-pane doesn't preserve it
+	sessionName := getTmuxSessionName()
+	inHub := sessionName == hub.HubSessionName || isSeanceHubSession()
+
 	// If in hub session, add hub context prompt
-	if os.Getenv("WT_HUB") == "1" {
+	if inHub {
 		editorCmd = fmt.Sprintf("%s -p %q", editorCmd, HubPrompt)
 	}
 
 	// Build respawn command - start fresh Claude with same flags
-	respawnCmd := fmt.Sprintf("cd %s && exec %s", cwd, editorCmd)
-
-	// Determine target pane - explicitly target hub.0 when in hub session
-	// to avoid accidentally respawning the watch pane
-	targetPane := ""
-	if os.Getenv("WT_HUB") == "1" {
-		targetPane = "hub.0"
+	// Set WT_HUB=1 explicitly so the new process has it (respawn-pane doesn't inherit session env)
+	var respawnCmd string
+	if inHub {
+		respawnCmd = fmt.Sprintf("cd %s && WT_HUB=1 exec %s", cwd, editorCmd)
+	} else {
+		respawnCmd = fmt.Sprintf("cd %s && exec %s", cwd, editorCmd)
 	}
 
-	// Use tmux respawn-pane to replace the pane process
+	// Determine target pane - explicitly target session.0 when in hub session
+	// to avoid accidentally respawning the watch pane
 	var cmd *exec.Cmd
-	if targetPane != "" {
+	if inHub {
+		targetPane := sessionName + ".0"
 		cmd = exec.Command("tmux", "respawn-pane", "-k", "-t", targetPane, respawnCmd)
 	} else {
 		cmd = exec.Command("tmux", "respawn-pane", "-k", respawnCmd)
