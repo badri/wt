@@ -80,22 +80,18 @@ func Run(cfg *config.Config, opts *Options) (*Result, error) {
 		return result, nil
 	}
 
-	// 2. Write handoff context - either to hub bead or legacy file
+	// 2. Write handoff context to file (always) and hub bead (if in hub)
+	// Always write to file so the new Claude can read it via the startup prompt
+	handoffPath := getHandoffFilePath(cfg)
+	if err := writeHandoffFile(handoffPath, context); err != nil {
+		return nil, fmt.Errorf("writing handoff file: %w", err)
+	}
+
+	// Also update hub bead for hub sessions (for persistence/history)
 	if inHub {
-		// Use hub-level beads for hub sessions
 		if err := hub.UpdateHandoffBead(cfg, context); err != nil {
-			// Fall back to file if beads fail
-			fmt.Fprintf(os.Stderr, "Warning: could not update hub handoff bead: %v (falling back to file)\n", err)
-			handoffPath := getHandoffFilePath(cfg)
-			if err := writeHandoffFile(handoffPath, context); err != nil {
-				return nil, fmt.Errorf("writing handoff file: %w", err)
-			}
-		}
-	} else {
-		// Legacy file-based handoff for non-hub sessions
-		handoffPath := getHandoffFilePath(cfg)
-		if err := writeHandoffFile(handoffPath, context); err != nil {
-			return nil, fmt.Errorf("writing handoff file: %w", err)
+			// Non-fatal - file is the primary mechanism now
+			fmt.Fprintf(os.Stderr, "Warning: could not update hub handoff bead: %v\n", err)
 		}
 	}
 	result.BeadUpdated = true
@@ -314,6 +310,10 @@ func clearTmuxHistory() {
 // Note: Avoid backticks as they cause shell interpretation issues in tmux respawn-pane
 const HubPrompt = "You are in the hub session. For queries about ready/available work, use 'wt ready' (not bd ready) to see work across ALL registered projects. Prefer /wt skill over /beads:ready in this context."
 
+// HandoffPrompt is injected after a handoff to instruct Claude to read the context
+// Note: Avoid backticks as they cause shell interpretation issues in tmux respawn-pane
+const HandoffPrompt = "A handoff just occurred. IMPORTANT: First read the handoff context file at ~/.config/wt/handoff.md to understand what was happening in the previous session, then acknowledge the handoff to the user."
+
 // respawnClaude respawns Claude in the hub's main pane (pane 0)
 func respawnClaude(cfg *config.Config) error {
 	// Check if we're in tmux
@@ -338,10 +338,13 @@ func respawnClaude(cfg *config.Config) error {
 	sessionName := getTmuxSessionName()
 	inHub := sessionName == hub.HubSessionName || isSeanceHubSession()
 
-	// If in hub session, add hub context prompt
+	// Build the prompt: hub context (if applicable) + handoff instruction
+	// The handoff prompt tells Claude to read the context file
+	prompt := HandoffPrompt
 	if inHub {
-		editorCmd = fmt.Sprintf("%s -p %q", editorCmd, HubPrompt)
+		prompt = HubPrompt + " " + HandoffPrompt
 	}
+	editorCmd = fmt.Sprintf("%s -p %q", editorCmd, prompt)
 
 	// Build respawn command - start fresh Claude with same flags
 	// Set WT_HUB=1 explicitly so the new process has it (respawn-pane doesn't inherit session env)
