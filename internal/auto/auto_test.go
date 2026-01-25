@@ -256,3 +256,83 @@ func TestLockInfoWithEpic(t *testing.T) {
 		t.Errorf("expected epic 'wt-doc-batch', got %s", readLock.Epic)
 	}
 }
+
+func TestEpicStateWithFailedBeads(t *testing.T) {
+	// Test that FailedBeads map is properly serialized and deserialized
+	state := &EpicState{
+		EpicID:         "wt-test-epic",
+		Worktree:       "/tmp/worktree",
+		SessionName:    "auto-test",
+		Beads:          []string{"wt-a1", "wt-b2", "wt-c3"},
+		CompletedBeads: []string{"wt-a1"},
+		FailedBeads: map[string]string{
+			"wt-b2": "failed-send",
+			"wt-c3": "timeout",
+		},
+		Status:     "partial",
+		StartTime:  time.Now().Format(time.RFC3339),
+		ProjectDir: "/path/to/project",
+	}
+
+	data, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		t.Fatalf("marshaling state: %v", err)
+	}
+
+	var readState EpicState
+	if err := json.Unmarshal(data, &readState); err != nil {
+		t.Fatalf("unmarshaling state: %v", err)
+	}
+
+	if len(readState.FailedBeads) != 2 {
+		t.Errorf("expected 2 failed beads, got %d", len(readState.FailedBeads))
+	}
+
+	if readState.FailedBeads["wt-b2"] != "failed-send" {
+		t.Errorf("expected 'failed-send' for wt-b2, got %s", readState.FailedBeads["wt-b2"])
+	}
+
+	if readState.FailedBeads["wt-c3"] != "timeout" {
+		t.Errorf("expected 'timeout' for wt-c3, got %s", readState.FailedBeads["wt-c3"])
+	}
+
+	if readState.Status != "partial" {
+		t.Errorf("expected status 'partial', got %s", readState.Status)
+	}
+}
+
+func TestEpicStateBackwardsCompatibility(t *testing.T) {
+	// Test that old state format (with FailedBead/FailureReason) still works
+	oldStateJSON := `{
+		"epic_id": "wt-old-epic",
+		"worktree": "/tmp/worktree",
+		"session_name": "auto-test",
+		"beads": ["wt-a1", "wt-b2"],
+		"completed_beads": ["wt-a1"],
+		"current_bead": "wt-b2",
+		"failed_bead": "wt-b2",
+		"failure_reason": "timeout",
+		"status": "failed",
+		"start_time": "2024-01-01T00:00:00Z",
+		"project_dir": "/path/to/project"
+	}`
+
+	var state EpicState
+	if err := json.Unmarshal([]byte(oldStateJSON), &state); err != nil {
+		t.Fatalf("unmarshaling old state: %v", err)
+	}
+
+	// Old fields should still work
+	if state.FailedBead != "wt-b2" {
+		t.Errorf("expected FailedBead 'wt-b2', got %s", state.FailedBead)
+	}
+
+	if state.FailureReason != "timeout" {
+		t.Errorf("expected FailureReason 'timeout', got %s", state.FailureReason)
+	}
+
+	// FailedBeads should be nil for old state format
+	if state.FailedBeads != nil {
+		t.Errorf("expected nil FailedBeads for old format, got %v", state.FailedBeads)
+	}
+}

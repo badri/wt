@@ -529,18 +529,19 @@ type LockInfo struct {
 
 // EpicState tracks the state of an epic batch run
 type EpicState struct {
-	EpicID         string   `json:"epic_id"`
-	Worktree       string   `json:"worktree"`
-	SessionName    string   `json:"session_name"`
-	Beads          []string `json:"beads"`
-	CompletedBeads []string `json:"completed_beads"`
-	CurrentBead    string   `json:"current_bead,omitempty"`
-	FailedBead     string   `json:"failed_bead,omitempty"`
-	FailureReason  string   `json:"failure_reason,omitempty"`
-	Status         string   `json:"status"` // running, paused, failed, completed
-	StartTime      string   `json:"start_time"`
-	ProjectDir     string   `json:"project_dir"`
-	MergeMode      string   `json:"merge_mode"`
+	EpicID         string            `json:"epic_id"`
+	Worktree       string            `json:"worktree"`
+	SessionName    string            `json:"session_name"`
+	Beads          []string          `json:"beads"`
+	CompletedBeads []string          `json:"completed_beads"`
+	FailedBeads    map[string]string `json:"failed_beads,omitempty"` // bead ID -> failure reason
+	CurrentBead    string            `json:"current_bead,omitempty"`
+	FailedBead     string            `json:"failed_bead,omitempty"`    // deprecated: use FailedBeads
+	FailureReason  string            `json:"failure_reason,omitempty"` // deprecated: use FailedBeads
+	Status         string            `json:"status"`                   // running, paused, failed, completed
+	StartTime      string            `json:"start_time"`
+	ProjectDir     string            `json:"project_dir"`
+	MergeMode      string            `json:"merge_mode"`
 }
 
 // EpicAuditResult holds the result of auditing an epic
@@ -623,6 +624,7 @@ func (r *Runner) processEpic() error {
 		Worktree:    worktreePath,
 		SessionName: sessionName,
 		Beads:       make([]string, len(beads)),
+		FailedBeads: make(map[string]string),
 		Status:      "running",
 		StartTime:   time.Now().Format(time.RFC3339),
 		ProjectDir:  projectDir,
@@ -680,6 +682,9 @@ func (r *Runner) processEpic() error {
 				return fmt.Errorf("bead %s failed: %s", b.ID, outcome)
 			}
 
+			// Track failed bead
+			state.FailedBeads[b.ID] = outcome
+			r.saveEpicState(state)
 			fmt.Printf("Warning: bead %s failed (%s), continuing...\n", b.ID, outcome)
 			continue
 		}
@@ -689,11 +694,23 @@ func (r *Runner) processEpic() error {
 		fmt.Printf("✓ Bead %s completed\n", b.ID)
 	}
 
-	// All beads completed - handle merge
-	state.Status = "completed"
+	// Determine final status based on failures
+	allSucceeded := len(state.FailedBeads) == 0
+	if allSucceeded {
+		state.Status = "completed"
+	} else {
+		state.Status = "partial"
+	}
 	r.saveEpicState(state)
 
-	fmt.Printf("\n=== All %d bead(s) completed ===\n", len(beads))
+	fmt.Printf("\n=== All %d bead(s) processed ===\n", len(beads))
+	fmt.Printf("  Completed: %d\n", len(state.CompletedBeads))
+	if len(state.FailedBeads) > 0 {
+		fmt.Printf("  Failed: %d\n", len(state.FailedBeads))
+		for beadID, reason := range state.FailedBeads {
+			fmt.Printf("    - %s: %s\n", beadID, reason)
+		}
+	}
 
 	// Determine merge mode
 	mergeMode := r.opts.MergeMode
@@ -704,26 +721,32 @@ func (r *Runner) processEpic() error {
 		mergeMode = r.cfg.DefaultMergeMode
 	}
 
-	if mergeMode != "none" {
+	if mergeMode != "none" && allSucceeded {
 		fmt.Printf("Merge mode: %s\n", mergeMode)
 		// TODO: Implement merge/PR creation
 		fmt.Println("(Merge/PR creation not yet implemented)")
 	}
 
-	// Close the epic
-	if err := r.closeEpic(epicID, projectDir); err != nil {
-		r.logger.Log("Warning: could not close epic: %v", err)
-		fmt.Printf("Warning: could not auto-close epic: %v\n", err)
+	// Only close epic if all beads succeeded
+	if allSucceeded {
+		if err := r.closeEpic(epicID, projectDir); err != nil {
+			r.logger.Log("Warning: could not close epic: %v", err)
+			fmt.Printf("Warning: could not auto-close epic: %v\n", err)
+		} else {
+			fmt.Printf("✓ Epic %s closed\n", epicID)
+		}
+
+		// Remove batch mode marker so wt done can clean up if run manually later
+		batchMarkerPath := filepath.Join(worktreePath, ".wt-batch-mode")
+		os.Remove(batchMarkerPath)
+
+		// Clean up state file
+		r.removeEpicState()
 	} else {
-		fmt.Printf("✓ Epic %s closed\n", epicID)
+		fmt.Printf("\n✗ Epic %s NOT closed due to failed beads\n", epicID)
+		fmt.Printf("  Fix failures and run 'wt auto --resume --epic %s' to retry\n", epicID)
+		fmt.Printf("  Or run 'wt auto --abort --epic %s' to clean up\n", epicID)
 	}
-
-	// Remove batch mode marker so wt done can clean up if run manually later
-	batchMarkerPath := filepath.Join(worktreePath, ".wt-batch-mode")
-	os.Remove(batchMarkerPath)
-
-	// Clean up state file
-	r.removeEpicState()
 
 	return nil
 }
@@ -1100,7 +1123,10 @@ func (r *Runner) checkStatus() error {
 	if state.CurrentBead != "" {
 		fmt.Printf("  Current:    %s\n", state.CurrentBead)
 	}
-	if state.FailedBead != "" {
+	if len(state.FailedBeads) > 0 {
+		fmt.Printf("  Failed:     %d bead(s)\n", len(state.FailedBeads))
+	} else if state.FailedBead != "" {
+		// Backwards compatibility with old state format
 		fmt.Printf("  Failed:     %s (%s)\n", state.FailedBead, state.FailureReason)
 	}
 
@@ -1113,7 +1139,11 @@ func (r *Runner) checkStatus() error {
 				break
 			}
 		}
-		if beadID == state.FailedBead {
+		// Check FailedBeads map first
+		if reason, failed := state.FailedBeads[beadID]; failed {
+			status = fmt.Sprintf("✗ failed (%s)", reason)
+		} else if beadID == state.FailedBead {
+			// Backwards compatibility
 			status = "✗ failed"
 		} else if beadID == state.CurrentBead && state.Status == "running" {
 			status = "→ running"
@@ -1186,10 +1216,16 @@ func (r *Runner) resumeRun() error {
 		return fmt.Errorf("finding project: %w", err)
 	}
 
-	// Update state
+	// Update state - clear failures on resume
 	state.Status = "running"
 	state.FailedBead = ""
 	state.FailureReason = ""
+	if state.FailedBeads == nil {
+		state.FailedBeads = make(map[string]string)
+	} else {
+		// Clear failed beads on resume - we're retrying them
+		state.FailedBeads = make(map[string]string)
+	}
 	r.saveEpicState(state)
 
 	// Get auto config
@@ -1228,6 +1264,9 @@ func (r *Runner) resumeRun() error {
 				r.saveEpicState(state)
 				return fmt.Errorf("bead %s failed: %s", b.ID, outcome)
 			}
+			// Track failed bead
+			state.FailedBeads[b.ID] = outcome
+			r.saveEpicState(state)
 			fmt.Printf("Warning: bead %s failed (%s), continuing...\n", b.ID, outcome)
 			continue
 		}
@@ -1237,24 +1276,43 @@ func (r *Runner) resumeRun() error {
 		fmt.Printf("✓ Bead %s completed\n", b.ID)
 	}
 
-	// All done
-	state.Status = "completed"
+	// Determine final status based on failures
+	allSucceeded := len(state.FailedBeads) == 0
+	if allSucceeded {
+		state.Status = "completed"
+	} else {
+		state.Status = "partial"
+	}
 	r.saveEpicState(state)
 
-	fmt.Printf("\n=== All beads completed ===\n")
-
-	// Close epic
-	if err := r.closeEpic(state.EpicID, state.ProjectDir); err != nil {
-		fmt.Printf("Warning: could not auto-close epic: %v\n", err)
-	} else {
-		fmt.Printf("✓ Epic %s closed\n", state.EpicID)
+	fmt.Printf("\n=== All %d bead(s) processed ===\n", len(state.Beads))
+	fmt.Printf("  Completed: %d\n", len(state.CompletedBeads))
+	if len(state.FailedBeads) > 0 {
+		fmt.Printf("  Failed: %d\n", len(state.FailedBeads))
+		for beadID, reason := range state.FailedBeads {
+			fmt.Printf("    - %s: %s\n", beadID, reason)
+		}
 	}
 
-	// Remove batch mode marker so wt done can clean up if run manually later
-	batchMarkerPath := filepath.Join(state.Worktree, ".wt-batch-mode")
-	os.Remove(batchMarkerPath)
+	// Only close epic if all beads succeeded
+	if allSucceeded {
+		if err := r.closeEpic(state.EpicID, state.ProjectDir); err != nil {
+			fmt.Printf("Warning: could not auto-close epic: %v\n", err)
+		} else {
+			fmt.Printf("✓ Epic %s closed\n", state.EpicID)
+		}
 
-	r.removeEpicState()
+		// Remove batch mode marker so wt done can clean up if run manually later
+		batchMarkerPath := filepath.Join(state.Worktree, ".wt-batch-mode")
+		os.Remove(batchMarkerPath)
+
+		r.removeEpicState()
+	} else {
+		fmt.Printf("\n✗ Epic %s NOT closed due to failed beads\n", state.EpicID)
+		fmt.Printf("  Fix failures and run 'wt auto --resume --epic %s' to retry\n", state.EpicID)
+		fmt.Printf("  Or run 'wt auto --abort --epic %s' to clean up\n", state.EpicID)
+	}
+
 	return nil
 }
 
