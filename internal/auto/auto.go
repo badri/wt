@@ -527,13 +527,24 @@ type LockInfo struct {
 	Epic      string `json:"epic,omitempty"`
 }
 
+// BeadCommitInfo tracks commit information for a completed bead
+type BeadCommitInfo struct {
+	BeadID     string `json:"bead_id"`
+	CommitHash string `json:"commit_hash"`
+	Summary    string `json:"summary"`
+	Title      string `json:"title"`
+}
+
 // EpicState tracks the state of an epic batch run
 type EpicState struct {
 	EpicID         string            `json:"epic_id"`
+	EpicTitle      string            `json:"epic_title,omitempty"` // For batch-aware prompts
 	Worktree       string            `json:"worktree"`
 	SessionName    string            `json:"session_name"`
 	Beads          []string          `json:"beads"`
+	BeadTitles     map[string]string `json:"bead_titles,omitempty"` // bead ID -> title
 	CompletedBeads []string          `json:"completed_beads"`
+	BeadCommits    []BeadCommitInfo  `json:"bead_commits,omitempty"` // Track commit info for each completed bead
 	FailedBeads    map[string]string `json:"failed_beads,omitempty"` // bead ID -> failure reason
 	CurrentBead    string            `json:"current_bead,omitempty"`
 	FailedBead     string            `json:"failed_bead,omitempty"`    // deprecated: use FailedBeads
@@ -618,13 +629,19 @@ func (r *Runner) processEpic() error {
 	fmt.Printf("\nCreated worktree: %s\n", worktreePath)
 	fmt.Printf("Session: %s\n", sessionName)
 
+	// Fetch epic title for batch-aware prompts
+	epicTitle := r.getEpicTitle(epicID, projectDir)
+
 	// Save epic state for resume/abort
 	state := &EpicState{
 		EpicID:      epicID,
+		EpicTitle:   epicTitle,
 		Worktree:    worktreePath,
 		SessionName: sessionName,
 		Beads:       make([]string, len(beads)),
+		BeadTitles:  make(map[string]string),
 		FailedBeads: make(map[string]string),
+		BeadCommits: []BeadCommitInfo{},
 		Status:      "running",
 		StartTime:   time.Now().Format(time.RFC3339),
 		ProjectDir:  projectDir,
@@ -632,6 +649,7 @@ func (r *Runner) processEpic() error {
 	}
 	for i, b := range beads {
 		state.Beads[i] = b.ID
+		state.BeadTitles[b.ID] = b.Title
 	}
 	if err := r.saveEpicState(state); err != nil {
 		r.logger.Log("Warning: could not save epic state: %v", err)
@@ -644,8 +662,8 @@ func (r *Runner) processEpic() error {
 		timeout = time.Duration(r.opts.Timeout) * time.Minute
 	}
 
-	// Process beads sequentially in the shared worktree
-	fmt.Printf("\nProcessing %d bead(s) sequentially...\n", len(beads))
+	// Process beads sequentially in the shared worktree with fresh sessions
+	fmt.Printf("\nProcessing %d bead(s) sequentially (fresh session per bead)...\n", len(beads))
 	for i, b := range beads {
 		if r.shouldStop() {
 			r.logger.Log("Stop signal received, pausing epic")
@@ -662,8 +680,8 @@ func (r *Runner) processEpic() error {
 		state.CurrentBead = b.ID
 		r.saveEpicState(state)
 
-		// Build prompt for this bead
-		prompt := r.buildEpicBeadPrompt(&b, sessionName, proj, i+1, len(beads))
+		// Build batch-aware prompt for this bead (includes previous bead summaries)
+		prompt := r.buildEpicBeadPrompt(&b, sessionName, proj, i+1, len(beads), state)
 
 		// Run claude for this bead
 		outcome, err := r.runClaudeInSession(sessionName, autoCfg.Command, prompt, timeout)
@@ -689,9 +707,31 @@ func (r *Runner) processEpic() error {
 			continue
 		}
 
+		// Capture commit info for this bead (for next bead's context)
+		commitHash, commitMsg, err := r.getLatestCommitInfo(worktreePath)
+		if err != nil {
+			r.logger.Log("Warning: could not get commit info: %v", err)
+		} else {
+			state.BeadCommits = append(state.BeadCommits, BeadCommitInfo{
+				BeadID:     b.ID,
+				CommitHash: commitHash,
+				Summary:    commitMsg,
+				Title:      b.Title,
+			})
+		}
+
 		state.CompletedBeads = append(state.CompletedBeads, b.ID)
 		r.saveEpicState(state)
-		fmt.Printf("✓ Bead %s completed\n", b.ID)
+		fmt.Printf("✓ Bead %s completed (commit: %s)\n", b.ID, commitHash)
+
+		// Kill Claude session to start fresh for next bead (prevents context rot)
+		// Only if there are more beads to process
+		if i < len(beads)-1 {
+			fmt.Printf("  Ending Claude session for fresh context on next bead...\n")
+			r.killClaudeSession(sessionName)
+			// Brief delay to let shell stabilize before starting new Claude
+			time.Sleep(2 * time.Second)
+		}
 	}
 
 	// Determine final status based on failures
@@ -979,29 +1019,60 @@ func (r *Runner) createEpicWorktree(epicID string, _ *project.Project) (string, 
 }
 
 // buildEpicBeadPrompt builds the prompt for processing a bead within an epic
-func (r *Runner) buildEpicBeadPrompt(b *bead.ReadyBead, sessionName string, _ *project.Project, current, total int) string {
+// This is the batch-aware version that includes epic context and previous bead summaries
+func (r *Runner) buildEpicBeadPrompt(b *bead.ReadyBead, sessionName string, _ *project.Project, current, total int, state *EpicState) string {
 	var sb strings.Builder
 
-	sb.WriteString(fmt.Sprintf("Work on bead %s: %s\n\n", b.ID, b.Title))
+	// Header with epic context
+	sb.WriteString(fmt.Sprintf("You are working on bead %d/%d in epic %s: \"%s\"\n\n", current, total, state.EpicID, b.Title))
+
+	// Epic context section
+	sb.WriteString("## Epic Context\n")
+	if state.EpicTitle != "" {
+		sb.WriteString(fmt.Sprintf("Epic: %s\n", state.EpicTitle))
+	} else {
+		sb.WriteString(fmt.Sprintf("Epic ID: %s\n", state.EpicID))
+	}
+	sb.WriteString(fmt.Sprintf("Total beads: %d\n", total))
+	sb.WriteString(fmt.Sprintf("Current: %d/%d\n\n", current, total))
+
+	// Previous work section (if any beads completed)
+	if len(state.BeadCommits) > 0 {
+		sb.WriteString("## Previous Work (already committed in this worktree)\n")
+		for _, commit := range state.BeadCommits {
+			title := commit.Title
+			if title == "" {
+				title = commit.Summary
+			}
+			sb.WriteString(fmt.Sprintf("- %s: %s (commit %s)\n", commit.BeadID, title, commit.CommitHash))
+		}
+		sb.WriteString("\n")
+	}
+
+	// Your task section
+	sb.WriteString("## Your Task\n")
+	sb.WriteString(fmt.Sprintf("Bead: %s\n", b.ID))
+	sb.WriteString(fmt.Sprintf("Title: %s\n\n", b.Title))
 
 	if b.Description != "" {
 		sb.WriteString(b.Description)
 		sb.WriteString("\n\n")
 	}
 
-	sb.WriteString(fmt.Sprintf("This is bead %d of %d in an automated batch.\n\n", current, total))
+	// Workflow section with bead-done signal
+	sb.WriteString("## Workflow\n")
+	sb.WriteString("1. Review previous commits if relevant: `git log --oneline -5`\n")
+	sb.WriteString("2. Implement this bead (build on existing work)\n")
+	sb.WriteString("3. Commit your changes with descriptive message\n")
+	sb.WriteString("4. Signal completion: `wt signal bead-done \"<brief summary of what was done>\"`\n\n")
 
-	sb.WriteString("Workflow:\n")
-	sb.WriteString("1. Implement the task\n")
-	sb.WriteString("2. Commit your changes with descriptive message\n")
-	sb.WriteString("3. Run `wt done` to complete\n\n")
+	sb.WriteString("## Important\n")
+	sb.WriteString("Do NOT:\n")
+	sb.WriteString("- Create a PR (wt auto handles this after all beads)\n")
+	sb.WriteString("- Run `wt done` (use `wt signal bead-done` instead)\n")
+	sb.WriteString("- Modify files unrelated to this bead\n\n")
 
-	sb.WriteString("IMPORTANT: `wt done` handles everything:\n")
-	sb.WriteString("- Closes the bead\n")
-	sb.WriteString("- Signals completion to the batch runner\n\n")
-
-	sb.WriteString("Do NOT run `git push` or `bd close` separately.\n\n")
-
+	// Commit message format
 	sb.WriteString("## Commit Message Format\n")
 	sb.WriteString("Include this footer in your commit messages:\n\n")
 	sb.WriteString("```\n")
@@ -1038,6 +1109,24 @@ func (r *Runner) closeEpic(epicID, projectDir string) error {
 		return fmt.Errorf("closing epic: %s: %w", string(output), err)
 	}
 	return nil
+}
+
+// getEpicTitle fetches the title of an epic for batch-aware prompts
+func (r *Runner) getEpicTitle(epicID, projectDir string) string {
+	cmd := exec.Command("bd", "show", epicID, "--json")
+	cmd.Dir = projectDir
+	output, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+
+	var infos []struct {
+		Title string `json:"title"`
+	}
+	if err := json.Unmarshal(output, &infos); err != nil || len(infos) == 0 {
+		return ""
+	}
+	return infos[0].Title
 }
 
 // Epic state file management
@@ -1235,7 +1324,12 @@ func (r *Runner) resumeRun() error {
 		timeout = time.Duration(r.opts.Timeout) * time.Minute
 	}
 
-	// Process remaining beads
+	// Ensure BeadCommits is initialized (may be nil if loaded from old state)
+	if state.BeadCommits == nil {
+		state.BeadCommits = []BeadCommitInfo{}
+	}
+
+	// Process remaining beads with fresh sessions
 	for i, b := range remainingBeads {
 		beadNum := resumeIndex + i + 1
 		totalBeads := len(state.Beads)
@@ -1253,7 +1347,8 @@ func (r *Runner) resumeRun() error {
 		state.CurrentBead = b.ID
 		r.saveEpicState(state)
 
-		prompt := r.buildEpicBeadPrompt(&b, state.SessionName, proj, beadNum, totalBeads)
+		// Build batch-aware prompt (includes previous bead summaries)
+		prompt := r.buildEpicBeadPrompt(&b, state.SessionName, proj, beadNum, totalBeads, state)
 
 		outcome, err := r.runClaudeInSession(state.SessionName, autoCfg.Command, prompt, timeout)
 		if err != nil || (outcome != "success" && outcome != "dry-run") {
@@ -1271,9 +1366,31 @@ func (r *Runner) resumeRun() error {
 			continue
 		}
 
+		// Capture commit info for this bead (for next bead's context)
+		commitHash, commitMsg, err := r.getLatestCommitInfo(state.Worktree)
+		if err != nil {
+			r.logger.Log("Warning: could not get commit info: %v", err)
+		} else {
+			state.BeadCommits = append(state.BeadCommits, BeadCommitInfo{
+				BeadID:     b.ID,
+				CommitHash: commitHash,
+				Summary:    commitMsg,
+				Title:      b.Title,
+			})
+		}
+
 		state.CompletedBeads = append(state.CompletedBeads, b.ID)
 		r.saveEpicState(state)
-		fmt.Printf("✓ Bead %s completed\n", b.ID)
+		fmt.Printf("✓ Bead %s completed (commit: %s)\n", b.ID, commitHash)
+
+		// Kill Claude session to start fresh for next bead (prevents context rot)
+		// Only if there are more beads to process
+		if i < len(remainingBeads)-1 {
+			fmt.Printf("  Ending Claude session for fresh context on next bead...\n")
+			r.killClaudeSession(state.SessionName)
+			// Brief delay to let shell stabilize before starting new Claude
+			time.Sleep(2 * time.Second)
+		}
 	}
 
 	// Determine final status based on failures
@@ -1352,6 +1469,50 @@ func (r *Runner) abortRun() error {
 
 	fmt.Println("\n✓ Epic run aborted and cleaned up.")
 	fmt.Printf("Note: %d bead(s) were completed before abort.\n", len(state.CompletedBeads))
+
+	return nil
+}
+
+// getLatestCommitInfo retrieves the latest commit hash and message from a worktree
+func (r *Runner) getLatestCommitInfo(worktreePath string) (hash, message string, err error) {
+	// Get the latest commit hash
+	cmd := exec.Command("git", "rev-parse", "--short", "HEAD")
+	cmd.Dir = worktreePath
+	hashOutput, err := cmd.Output()
+	if err != nil {
+		return "", "", fmt.Errorf("getting commit hash: %w", err)
+	}
+	hash = strings.TrimSpace(string(hashOutput))
+
+	// Get the commit message (first line)
+	cmd = exec.Command("git", "log", "-1", "--format=%s")
+	cmd.Dir = worktreePath
+	msgOutput, err := cmd.Output()
+	if err != nil {
+		return hash, "", fmt.Errorf("getting commit message: %w", err)
+	}
+	message = strings.TrimSpace(string(msgOutput))
+
+	return hash, message, nil
+}
+
+// killClaudeSession terminates the Claude process in a tmux session without killing the session
+func (r *Runner) killClaudeSession(sessionName string) error {
+	// Send Ctrl+C to gracefully stop claude, then wait a moment
+	cmd := exec.Command("tmux", "send-keys", "-t", sessionName, "C-c")
+	if err := cmd.Run(); err != nil {
+		r.logger.Log("Warning: could not send Ctrl+C to session: %v", err)
+	}
+
+	// Wait for Claude to exit
+	time.Sleep(2 * time.Second)
+
+	// If still running, send another Ctrl+C
+	if r.isSessionActive(sessionName) {
+		cmd = exec.Command("tmux", "send-keys", "-t", sessionName, "C-c")
+		cmd.Run()
+		time.Sleep(1 * time.Second)
+	}
 
 	return nil
 }
