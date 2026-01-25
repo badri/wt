@@ -136,15 +136,11 @@ func NudgeSession(session, message string) error {
 		return fmt.Errorf("sending message: %w", err)
 	}
 
-	// 2. Wait 500ms for paste to complete (tested, required)
+	// 2. Wait 500ms for text to appear
 	time.Sleep(500 * time.Millisecond)
 
-	// 3. Send Escape to exit vim INSERT mode if enabled (harmless in normal mode)
-	escCmd := exec.Command("tmux", "send-keys", "-t", session, "Escape")
-	_ = escCmd.Run() // Ignore errors
-	time.Sleep(100 * time.Millisecond)
-
-	// 4. Send Enter with retry (critical for message submission)
+	// 3. Send Enter with retry (critical for message submission)
+	// Note: Removed Escape - it clears input in Claude Code
 	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {
 		if attempt > 0 {
