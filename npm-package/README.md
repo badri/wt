@@ -1,6 +1,6 @@
-# wt - Worktree Session Manager
+# wt - Claude Code Orchestrator
 
-Worktree session manager for bead-driven development with Claude.
+Claude Code orchestrator for bead-driven development.
 
 ## Installation
 

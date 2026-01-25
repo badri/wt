@@ -37,11 +37,14 @@ func run() error {
 	// Parse global --json flag
 	args = parseGlobalFlags(args)
 
-	// No args or "list" → list sessions
+	// No args → show help
 	if len(args) == 0 {
-		return cmdList(cfg, nil)
+		return cmdHelp()
 	}
 	if args[0] == "list" {
+		if hasHelpFlag(args[1:]) {
+			return cmdListHelp()
+		}
 		return cmdList(cfg, args[1:])
 	}
 
@@ -52,25 +55,43 @@ func run() error {
 		}
 		return cmdNew(cfg, args[1:])
 	case "kill":
+		if hasHelpFlag(args[1:]) {
+			return cmdKillHelp()
+		}
 		if len(args) < 2 {
-			return fmt.Errorf("usage: wt kill <name> [--keep-worktree]")
+			return cmdKillHelp()
 		}
 		return cmdKill(cfg, args[1], parseKillFlags(args[2:]))
 	case "close":
+		if hasHelpFlag(args[1:]) {
+			return cmdCloseHelp()
+		}
 		if len(args) < 2 {
-			return fmt.Errorf("usage: wt close <name>")
+			return cmdCloseHelp()
 		}
 		return cmdClose(cfg, args[1])
 	case "done":
+		if hasHelpFlag(args[1:]) {
+			return cmdDoneHelp()
+		}
 		return cmdDone(cfg, parseDoneFlags(args[1:]))
 	case "status":
+		if hasHelpFlag(args[1:]) {
+			return cmdStatusHelp()
+		}
 		return cmdStatus(cfg)
 	case "signal":
+		if hasHelpFlag(args[1:]) {
+			return cmdSignalHelp()
+		}
 		if len(args) < 2 {
-			return fmt.Errorf("usage: wt signal <status> [message]\n  status: ready, blocked, error, working")
+			return cmdSignalHelp()
 		}
 		return cmdSignal(cfg, args[1:])
 	case "abandon":
+		if hasHelpFlag(args[1:]) {
+			return cmdAbandonHelp()
+		}
 		return cmdAbandon(cfg)
 	case "watch":
 		if hasHelpFlag(args[1:]) {
@@ -78,24 +99,38 @@ func run() error {
 		}
 		return cmdWatch(cfg)
 	case "seance":
+		if hasHelpFlag(args[1:]) {
+			return cmdSeanceHelp()
+		}
 		return cmdSeance(cfg, args[1:])
 	case "projects":
-		// Alias for backward compatibility
+		if hasHelpFlag(args[1:]) {
+			return cmdProjectsHelp()
+		}
 		return cmdProjects(cfg)
 	case "ready":
+		if hasHelpFlag(args[1:]) {
+			return cmdReadyHelp()
+		}
 		var projectFilter string
 		if len(args) > 1 {
 			projectFilter = args[1]
 		}
 		return cmdReady(cfg, projectFilter)
 	case "create":
+		if hasHelpFlag(args[1:]) {
+			return cmdCreateHelp()
+		}
 		if len(args) < 3 {
-			return fmt.Errorf("usage: wt create <project> <title> [--description <desc>] [--priority <0-3>] [--type <type>]")
+			return cmdCreateHelp()
 		}
 		return cmdCreate(cfg, args[1], args[2:])
 	case "beads":
+		if hasHelpFlag(args[1:]) {
+			return cmdBeadsHelp()
+		}
 		if len(args) < 2 {
-			return fmt.Errorf("usage: wt beads <project> [--status <status>]")
+			return cmdBeadsHelp()
 		}
 		return cmdBeads(cfg, args[1], parseBeadsFlags(args[2:]))
 	case "project":
@@ -113,18 +148,36 @@ func run() error {
 		}
 		return cmdAuto(cfg, args[1:])
 	case "events":
+		if hasHelpFlag(args[1:]) {
+			return cmdEventsHelp()
+		}
 		return cmdEvents(cfg, args[1:])
 	case "doctor":
+		if hasHelpFlag(args[1:]) {
+			return cmdDoctorHelp()
+		}
 		return doctor.Run(cfg)
 	case "config":
+		if hasHelpFlag(args[1:]) {
+			return cmdConfigHelp()
+		}
 		return cmdConfig(cfg, args[1:])
 	case "pick":
+		if hasHelpFlag(args[1:]) {
+			return cmdPickHelp()
+		}
 		return cmdPick(cfg)
 	case "keys":
+		if hasHelpFlag(args[1:]) {
+			return cmdKeysHelp()
+		}
 		return cmdKeys()
 	case "completion":
+		if hasHelpFlag(args[1:]) {
+			return cmdCompletionHelp()
+		}
 		if len(args) < 2 {
-			return fmt.Errorf("usage: wt completion <bash|zsh|fish>")
+			return cmdCompletionHelp()
 		}
 		return cmdCompletion(args[1])
 	case "version", "--version", "-v":

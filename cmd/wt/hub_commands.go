@@ -127,6 +127,35 @@ EXAMPLES:
 	return nil
 }
 
+// cmdSeanceHelp shows help for the seance command
+func cmdSeanceHelp() error {
+	help := `wt seance - Talk to past sessions
+
+USAGE:
+    wt seance [name] [options]
+
+DESCRIPTION:
+    Lists or interacts with completed/archived sessions.
+    Useful for understanding past decisions or resuming work.
+
+ARGUMENTS:
+    [name]              Session name to interact with (optional)
+
+OPTIONS:
+    --spawn             Spawn new tmux session for seance
+    -p, --prompt <msg>  One-shot query to past session
+    -h, --help          Show this help
+
+EXAMPLES:
+    wt seance                           List past sessions
+    wt seance mysession                 Resume in new tmux pane
+    wt seance mysession --spawn         Spawn new tmux session
+    wt seance mysession -p "Why this?"  Ask about a decision
+`
+	fmt.Print(help)
+	return nil
+}
+
 // cmdWatch displays a live dashboard of all sessions using the TUI.
 // When run from a worker session (not hub), it uses tmux popup to show the watch.
 func cmdWatch(cfg *config.Config) error {

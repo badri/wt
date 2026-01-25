@@ -65,6 +65,186 @@ EXAMPLES:
 	return nil
 }
 
+// cmdListHelp shows help for the list command
+func cmdListHelp() error {
+	help := `wt list - List active sessions
+
+USAGE:
+    wt list [options]
+
+DESCRIPTION:
+    Shows all active worktree sessions with their status, bead, and duration.
+
+OPTIONS:
+    --all               Show all sessions including completed ones
+    -h, --help          Show this help
+
+EXAMPLES:
+    wt list             List active sessions
+    wt list --all       List all sessions including completed
+`
+	fmt.Print(help)
+	return nil
+}
+
+// cmdKillHelp shows help for the kill command
+func cmdKillHelp() error {
+	help := `wt kill - Terminate a session
+
+USAGE:
+    wt kill <name> [options]
+
+DESCRIPTION:
+    Terminates the tmux session and optionally removes the worktree.
+    The bead remains open for future work.
+
+ARGUMENTS:
+    <name>              Session name to kill
+
+OPTIONS:
+    --keep-worktree     Keep the git worktree (only kill tmux session)
+    -h, --help          Show this help
+
+EXAMPLES:
+    wt kill mysession               Kill session and remove worktree
+    wt kill mysession --keep-worktree  Kill session, keep worktree
+`
+	fmt.Print(help)
+	return nil
+}
+
+// cmdCloseHelp shows help for the close command
+func cmdCloseHelp() error {
+	help := `wt close - Complete a session and close the bead
+
+USAGE:
+    wt close <name>
+
+DESCRIPTION:
+    Terminates the session, removes the worktree, and closes the bead.
+    Use this when work on a bead is complete.
+
+ARGUMENTS:
+    <name>              Session name to close
+
+OPTIONS:
+    -h, --help          Show this help
+
+EXAMPLES:
+    wt close mysession  Complete and close the session
+`
+	fmt.Print(help)
+	return nil
+}
+
+// cmdDoneHelp shows help for the done command
+func cmdDoneHelp() error {
+	help := `wt done - Complete current session with merge
+
+USAGE:
+    wt done [options]
+
+DESCRIPTION:
+    Completes work in the current session by:
+    1. Committing any uncommitted changes
+    2. Rebasing on the target branch
+    3. Merging or creating a PR (based on merge mode)
+    4. Closing the bead
+    5. Cleaning up the session
+
+OPTIONS:
+    -m, --merge-mode <mode>  Merge mode: direct, pr-auto, pr-review
+    -h, --help               Show this help
+
+MERGE MODES:
+    direct      Merge directly to the target branch
+    pr-auto     Create PR and auto-merge if checks pass
+    pr-review   Create PR for review (no auto-merge)
+
+EXAMPLES:
+    wt done                     Complete with default merge mode
+    wt done --merge-mode direct Complete with direct merge
+    wt done -m pr-review        Create PR for review
+`
+	fmt.Print(help)
+	return nil
+}
+
+// cmdStatusHelp shows help for the status command
+func cmdStatusHelp() error {
+	help := `wt status - Show current session status
+
+USAGE:
+    wt status
+
+DESCRIPTION:
+    Displays detailed information about the current worktree session,
+    including bead info, git status, and session metadata.
+
+OPTIONS:
+    -h, --help          Show this help
+
+EXAMPLES:
+    wt status           Show current session status
+`
+	fmt.Print(help)
+	return nil
+}
+
+// cmdSignalHelp shows help for the signal command
+func cmdSignalHelp() error {
+	help := `wt signal - Update session status
+
+USAGE:
+    wt signal <status> [message]
+
+DESCRIPTION:
+    Updates the status of the current session. This is used to communicate
+    progress to the hub or other monitoring tools.
+
+ARGUMENTS:
+    <status>            Status: ready, blocked, error, working, idle
+
+STATUS VALUES:
+    ready       Work is complete, ready for review/merge
+    blocked     Waiting on external dependency or decision
+    error       An error occurred that needs attention
+    working     Actively working on the task
+    idle        Paused but not blocked
+
+OPTIONS:
+    -h, --help          Show this help
+
+EXAMPLES:
+    wt signal ready               Mark session as ready
+    wt signal blocked "Waiting on API access"  Mark blocked with reason
+    wt signal error "Tests failing"            Mark as error with message
+`
+	fmt.Print(help)
+	return nil
+}
+
+// cmdAbandonHelp shows help for the abandon command
+func cmdAbandonHelp() error {
+	help := `wt abandon - Abandon current session without merge
+
+USAGE:
+    wt abandon
+
+DESCRIPTION:
+    Abandons the current session without merging changes.
+    The worktree is removed but the bead remains open.
+
+OPTIONS:
+    -h, --help          Show this help
+
+EXAMPLES:
+    wt abandon          Abandon current session
+`
+	fmt.Print(help)
+	return nil
+}
+
 func parseNewFlags(args []string) (beadID string, flags newFlags) {
 	beadID = args[0]
 	for i := 1; i < len(args); i++ {

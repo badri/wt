@@ -63,6 +63,106 @@ SEE ALSO:
 	return nil
 }
 
+// cmdProjectsHelp shows help for the projects command
+func cmdProjectsHelp() error {
+	help := `wt projects - List registered projects
+
+USAGE:
+    wt projects
+
+DESCRIPTION:
+    Lists all registered projects with their repository paths and configurations.
+
+OPTIONS:
+    -h, --help          Show this help
+
+SEE ALSO:
+    wt project add      Register a new project
+    wt project config   Edit project configuration
+`
+	fmt.Print(help)
+	return nil
+}
+
+// cmdReadyHelp shows help for the ready command
+func cmdReadyHelp() error {
+	help := `wt ready - Show beads ready to work on
+
+USAGE:
+    wt ready [project]
+
+DESCRIPTION:
+    Lists beads that are ready to work on (no blockers, not in progress).
+    Optionally filter by project.
+
+ARGUMENTS:
+    [project]           Optional project name to filter by
+
+OPTIONS:
+    -h, --help          Show this help
+
+EXAMPLES:
+    wt ready            Show ready beads from all projects
+    wt ready myproject  Show ready beads from myproject only
+`
+	fmt.Print(help)
+	return nil
+}
+
+// cmdCreateHelp shows help for the create command
+func cmdCreateHelp() error {
+	help := `wt create - Create a new bead in a project
+
+USAGE:
+    wt create <project> <title> [options]
+
+DESCRIPTION:
+    Creates a new bead in the specified project.
+
+ARGUMENTS:
+    <project>           Project name to create bead in
+    <title>             Title for the new bead
+
+OPTIONS:
+    --description <desc>  Description for the bead
+    --priority <0-4>      Priority (0=critical, 2=medium, 4=backlog)
+    --type <type>         Type: task, bug, feature, chore, epic
+    -h, --help            Show this help
+
+EXAMPLES:
+    wt create myproj "Fix login bug"
+    wt create myproj "Add dark mode" --type feature --priority 2
+    wt create myproj "Refactor auth" --description "Clean up auth module"
+`
+	fmt.Print(help)
+	return nil
+}
+
+// cmdBeadsHelp shows help for the beads command
+func cmdBeadsHelp() error {
+	help := `wt beads - List beads for a project
+
+USAGE:
+    wt beads <project> [options]
+
+DESCRIPTION:
+    Lists all beads for the specified project.
+
+ARGUMENTS:
+    <project>           Project name
+
+OPTIONS:
+    --status <status>   Filter by status: open, in_progress, closed
+    -h, --help          Show this help
+
+EXAMPLES:
+    wt beads myproject              List all beads
+    wt beads myproject --status open  List only open beads
+`
+	fmt.Print(help)
+	return nil
+}
+
 func cmdProjects(cfg *config.Config) error {
 	return printProjectsList(cfg)
 }
