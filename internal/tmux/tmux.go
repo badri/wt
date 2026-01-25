@@ -122,72 +122,42 @@ func SwitchClient(name string) error {
 }
 
 // NudgeSession sends a message to a tmux session with reliable delivery.
-// Uses a temp file and tmux paste buffer to avoid double-pasting issues with send-keys.
+// Uses send-keys -l (literal mode) for reliable text entry.
 // Serialized via mutex to prevent interleaved keystrokes from concurrent calls.
+// Based on gastown's proven implementation.
 func NudgeSession(session, message string) error {
 	// Serialize access to prevent concurrent nudges from interleaving
 	nudgeMutex.Lock()
 	defer nudgeMutex.Unlock()
 
-	// 1. Write message to a temp file to avoid send-keys double-paste issues.
-	// Using send-keys with long/complex prompts can cause the text to appear
-	// twice in the input buffer (once executed, once echoed without Enter).
-	tmpFile, err := os.CreateTemp("", "wt-nudge-*.txt")
-	if err != nil {
-		return fmt.Errorf("creating temp file: %w", err)
-	}
-	tmpPath := tmpFile.Name()
-	defer os.Remove(tmpPath)
-
-	if _, err := tmpFile.WriteString(message); err != nil {
-		tmpFile.Close()
-		return fmt.Errorf("writing to temp file: %w", err)
-	}
-	tmpFile.Close()
-
-	// 2. Load the temp file into tmux's paste buffer
-	loadCmd := exec.Command("tmux", "load-buffer", tmpPath)
-	if err := loadCmd.Run(); err != nil {
-		return fmt.Errorf("loading buffer: %w", err)
+	// 1. Send text in literal mode (handles special characters)
+	sendCmd := exec.Command("tmux", "send-keys", "-t", session, "-l", message)
+	if err := sendCmd.Run(); err != nil {
+		return fmt.Errorf("sending message: %w", err)
 	}
 
-	// 3. Paste the buffer into the session
-	pasteCmd := exec.Command("tmux", "paste-buffer", "-t", session)
-	if err := pasteCmd.Run(); err != nil {
-		return fmt.Errorf("pasting buffer: %w", err)
-	}
+	// 2. Wait 500ms for paste to complete (tested, required)
+	time.Sleep(500 * time.Millisecond)
 
-	// 4. Wait for paste to complete - give extra time for long pastes
-	time.Sleep(1 * time.Second)
+	// 3. Send Escape to exit vim INSERT mode if enabled (harmless in normal mode)
+	escCmd := exec.Command("tmux", "send-keys", "-t", session, "Escape")
+	_ = escCmd.Run() // Ignore errors
+	time.Sleep(100 * time.Millisecond)
 
-	// 5. Verify paste succeeded by checking pane content
-	content, _ := CapturePane(session, 10)
-	if len(content) == 0 {
-		// Retry paste if pane appears empty
-		pasteCmd2 := exec.Command("tmux", "paste-buffer", "-t", session)
-		if err := pasteCmd2.Run(); err != nil {
-			return fmt.Errorf("retry pasting buffer: %w", err)
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-
-	// 6. Send Enter with retry and verification
-	// Note: Removed Escape key send - it was for vim mode but can interfere with Claude Code's input
+	// 4. Send Enter with retry (critical for message submission)
 	var lastErr error
-	for attempt := range 5 {
+	for attempt := 0; attempt < 3; attempt++ {
 		if attempt > 0 {
-			time.Sleep(500 * time.Millisecond)
+			time.Sleep(200 * time.Millisecond)
 		}
 		enterCmd := exec.Command("tmux", "send-keys", "-t", session, "Enter")
 		if err := enterCmd.Run(); err != nil {
 			lastErr = err
 			continue
 		}
-		// Give Claude time to process the Enter
-		time.Sleep(200 * time.Millisecond)
 		return nil
 	}
-	return fmt.Errorf("failed to send Enter after 5 attempts: %w", lastErr)
+	return fmt.Errorf("failed to send Enter after 3 attempts: %w", lastErr)
 }
 
 // WaitForClaude waits for Claude to be running in the session.
