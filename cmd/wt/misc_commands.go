@@ -143,6 +143,157 @@ EXAMPLES:
 	return nil
 }
 
+// cmdEventsHelp shows help for the events command
+func cmdEventsHelp() error {
+	help := `wt events - Show event history
+
+USAGE:
+    wt events [options]
+
+DESCRIPTION:
+    Shows the history of wt events (session starts, completions, etc).
+
+OPTIONS:
+    --since <duration>  Show events since duration (e.g., 1h, 24h, 7d)
+    -f, --follow        Tail mode - watch for new events
+    -n <count>          Number of events to show (default: 20)
+    -h, --help          Show this help
+
+EXAMPLES:
+    wt events               Show last 20 events
+    wt events --since 24h   Show events from the last 24 hours
+    wt events -f            Watch for new events
+    wt events -n 50         Show last 50 events
+`
+	fmt.Print(help)
+	return nil
+}
+
+// cmdConfigHelp shows help for the config command
+func cmdConfigHelp() error {
+	help := `wt config - Manage wt configuration
+
+USAGE:
+    wt config [command] [options]
+
+COMMANDS:
+    (none), show        Show current configuration
+    init                Create config file with defaults
+    set <key> <value>   Set a configuration value
+    edit                Open config in editor
+
+CONFIG KEYS:
+    worktree_root       Directory where worktrees are created
+    editor_cmd          Editor command for config editing
+    default_merge_mode  Default merge mode: direct, pr-auto, pr-review
+
+OPTIONS:
+    -h, --help          Show this help
+
+EXAMPLES:
+    wt config                           Show current config
+    wt config init                      Create config file
+    wt config set worktree_root ~/wt    Set worktree directory
+    wt config edit                      Open config in editor
+`
+	fmt.Print(help)
+	return nil
+}
+
+// cmdPickHelp shows help for the pick command
+func cmdPickHelp() error {
+	help := `wt pick - Interactive session picker
+
+USAGE:
+    wt pick
+
+DESCRIPTION:
+    Opens an interactive picker to select and switch to a session.
+    Uses fzf if available, otherwise falls back to a numbered list.
+
+OPTIONS:
+    -h, --help          Show this help
+
+EXAMPLES:
+    wt pick             Open session picker
+`
+	fmt.Print(help)
+	return nil
+}
+
+// cmdKeysHelp shows help for the keys command
+func cmdKeysHelp() error {
+	help := `wt keys - Output tmux keybinding suggestions
+
+USAGE:
+    wt keys
+
+DESCRIPTION:
+    Outputs suggested tmux keybindings for wt commands.
+    Add these to your ~/.tmux.conf file.
+
+OPTIONS:
+    -h, --help          Show this help
+
+EXAMPLES:
+    wt keys                     Show keybinding suggestions
+    wt keys >> ~/.tmux.conf     Append to tmux config
+`
+	fmt.Print(help)
+	return nil
+}
+
+// cmdCompletionHelp shows help for the completion command
+func cmdCompletionHelp() error {
+	help := `wt completion - Generate shell completions
+
+USAGE:
+    wt completion <shell>
+
+DESCRIPTION:
+    Generates shell completion scripts for bash, zsh, or fish.
+
+ARGUMENTS:
+    <shell>             Shell type: bash, zsh, fish
+
+OPTIONS:
+    -h, --help          Show this help
+
+EXAMPLES:
+    wt completion bash          Generate bash completions
+    wt completion zsh           Generate zsh completions
+    wt completion fish          Generate fish completions
+
+    # Add to shell config:
+    eval "$(wt completion bash)"     # bash
+    eval "$(wt completion zsh)"      # zsh
+    wt completion fish > ~/.config/fish/completions/wt.fish
+`
+	fmt.Print(help)
+	return nil
+}
+
+// cmdDoctorHelp shows help for the doctor command
+func cmdDoctorHelp() error {
+	help := `wt doctor - Check system requirements
+
+USAGE:
+    wt doctor
+
+DESCRIPTION:
+    Checks that all required tools are installed and configured correctly.
+    Validates git, tmux, bd (beads), and other dependencies.
+
+OPTIONS:
+    -h, --help          Show this help
+
+EXAMPLES:
+    wt doctor           Run system check
+`
+	fmt.Print(help)
+	return nil
+}
+
 // cmdEvents shows wt events
 func cmdEvents(cfg *config.Config, args []string) error {
 	logger := events.NewLogger(cfg)
@@ -572,13 +723,12 @@ func cmdVersion() error {
 
 // cmdHelp prints categorized help information
 func cmdHelp() error {
-	help := `wt - Worktree session manager for AI-assisted development
+	help := `wt - Claude Code orchestrator
 
 USAGE:
     wt [command] [options]
 
 SESSION COMMANDS:
-    wt                      List all active sessions
     wt list                 List all active sessions
     wt new <bead>           Create new session for a bead
                             Options: --repo <path>, --name <name>, --no-switch, --no-test-env

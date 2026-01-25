@@ -1,4 +1,4 @@
-# wt - Worktree Session Manager
+# wt - Claude Code Orchestrator
 
 Minimal agentic coding orchestrator built on:
 - **Beads** for task tracking

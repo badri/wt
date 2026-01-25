@@ -1,7 +1,7 @@
 {
   "name": "@worktree/wt",
   "version": "0.1.0",
-  "description": "Worktree session manager for bead-driven development with Claude",
+  "description": "Claude Code orchestrator for bead-driven development",
   "bin": {
     "wt": "bin/wt.js"
   },
