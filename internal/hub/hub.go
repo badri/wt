@@ -175,6 +175,15 @@ func create(cfg *config.Config, opts *Options) error {
 	if editorCmd != "" {
 		// Append hub context prompt so Claude knows it's in hub mode
 		hubPrompt := `You are in the **hub session**. For queries about ready/available work, use ` + "`wt ready`" + ` (not bd ready) to see work across ALL registered projects. Prefer /wt skill over /beads:ready in this context.`
+
+		// Check if there's pending handoff content to pick up
+		handoffPath := filepath.Join(cfg.ConfigDir(), "handoff.md")
+		if _, err := os.Stat(handoffPath); err == nil {
+			// Add handoff prompt so Claude reads the context
+			handoffPrompt := "A handoff just occurred. IMPORTANT: First read the handoff context file at ~/.config/wt/handoff.md to understand what was happening in the previous session, then acknowledge the handoff to the user."
+			hubPrompt = hubPrompt + " " + handoffPrompt
+		}
+
 		fullCmd := fmt.Sprintf("%s --append-system-prompt %q", editorCmd, hubPrompt)
 
 		// Send the editor command to start
