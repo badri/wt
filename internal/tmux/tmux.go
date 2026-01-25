@@ -136,24 +136,17 @@ func NudgeSession(session, message string) error {
 		return fmt.Errorf("sending message: %w", err)
 	}
 
-	// 2. Wait 500ms for text to appear
-	time.Sleep(500 * time.Millisecond)
+	// 2. Wait for text to appear in input
+	time.Sleep(1 * time.Second)
 
-	// 3. Send Enter with retry (critical for message submission)
-	// Note: Removed Escape - it clears input in Claude Code
-	var lastErr error
-	for attempt := 0; attempt < 3; attempt++ {
-		if attempt > 0 {
-			time.Sleep(200 * time.Millisecond)
-		}
-		enterCmd := exec.Command("tmux", "send-keys", "-t", session, "Enter")
-		if err := enterCmd.Run(); err != nil {
-			lastErr = err
-			continue
-		}
-		return nil
+	// 3. Send Enter to submit
+	// Use empty string "" followed by Enter - more reliable than just "Enter"
+	enterCmd := exec.Command("tmux", "send-keys", "-t", session, "", "Enter")
+	if err := enterCmd.Run(); err != nil {
+		return fmt.Errorf("sending Enter: %w", err)
 	}
-	return fmt.Errorf("failed to send Enter after 3 attempts: %w", lastErr)
+
+	return nil
 }
 
 // WaitForClaude waits for Claude to be running in the session.
