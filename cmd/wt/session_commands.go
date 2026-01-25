@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -1294,47 +1295,57 @@ func cmdDone(cfg *config.Config, flags doneFlags) error {
 		fmt.Printf("Warning: could not close bead: %v\n", err)
 	}
 
-	// Run teardown hooks if configured
-	if proj.TestEnv != nil && proj.TestEnv.Teardown != "" {
-		fmt.Println("Running test environment teardown...")
-		if err := testenv.RunTeardown(proj, sess.Worktree, sess.PortOffset); err != nil {
-			fmt.Printf("Warning: teardown failed: %v\n", err)
-		}
+	// Check for batch mode marker (wt auto creates this to signal we shouldn't clean up)
+	batchMarkerPath := filepath.Join(sess.Worktree, ".wt-batch-mode")
+	isBatchMode := false
+	if _, err := os.Stat(batchMarkerPath); err == nil {
+		isBatchMode = true
+		fmt.Println("\nBatch mode detected - keeping session alive for next bead.")
 	}
 
-	if proj.Hooks != nil && len(proj.Hooks.OnClose) > 0 {
-		fmt.Println("Running on_close hooks...")
-		portEnv := ""
-		if proj.TestEnv != nil {
-			portEnv = proj.TestEnv.PortEnv
+	if !isBatchMode {
+		// Run teardown hooks if configured
+		if proj.TestEnv != nil && proj.TestEnv.Teardown != "" {
+			fmt.Println("Running test environment teardown...")
+			if err := testenv.RunTeardown(proj, sess.Worktree, sess.PortOffset); err != nil {
+				fmt.Printf("Warning: teardown failed: %v\n", err)
+			}
 		}
-		if err := testenv.RunOnCloseHooks(proj, sess.Worktree, sess.PortOffset, portEnv); err != nil {
-			fmt.Printf("Warning: on_close hook failed: %v\n", err)
+
+		if proj.Hooks != nil && len(proj.Hooks.OnClose) > 0 {
+			fmt.Println("Running on_close hooks...")
+			portEnv := ""
+			if proj.TestEnv != nil {
+				portEnv = proj.TestEnv.PortEnv
+			}
+			if err := testenv.RunOnCloseHooks(proj, sess.Worktree, sess.PortOffset, portEnv); err != nil {
+				fmt.Printf("Warning: on_close hook failed: %v\n", err)
+			}
 		}
-	}
 
-	// Kill tmux session
-	fmt.Println("Terminating tmux session...")
-	if err := tmux.Kill(sessionName); err != nil {
-		fmt.Printf("Warning: %v\n", err)
-	}
+		// Kill tmux session
+		fmt.Println("Terminating tmux session...")
+		if err := tmux.Kill(sessionName); err != nil {
+			fmt.Printf("Warning: %v\n", err)
+		}
 
-	// Remove worktree
-	fmt.Printf("Removing worktree: %s\n", sess.Worktree)
-	if err := worktree.Remove(sess.Worktree); err != nil {
-		fmt.Printf("Warning: %v\n", err)
+		// Remove worktree
+		fmt.Printf("Removing worktree: %s\n", sess.Worktree)
+		if err := worktree.Remove(sess.Worktree); err != nil {
+			fmt.Printf("Warning: %v\n", err)
+		}
+
+		// Remove from state
+		delete(state.Sessions, sessionName)
+		if err := state.Save(); err != nil {
+			return fmt.Errorf("saving state: %w", err)
+		}
 	}
 
 	// Log session end event
 	eventLogger := events.NewLogger(cfg)
 	claudeSession := getClaudeSessionID(sess.Worktree)
 	eventLogger.LogSessionEnd(sessionName, sess.Bead, sess.Project, claudeSession, mergeMode, prURL)
-
-	// Remove from state
-	delete(state.Sessions, sessionName)
-	if err := state.Save(); err != nil {
-		return fmt.Errorf("saving state: %w", err)
-	}
 
 	fmt.Println("\nDone!")
 	return nil
