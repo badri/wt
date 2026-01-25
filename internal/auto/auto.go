@@ -314,6 +314,8 @@ func (r *Runner) runClaudeInSession(sessionName, command, prompt string, timeout
 			// Check if session is still alive and active
 			if !r.isSessionActive(sessionName) {
 				fmt.Printf("Session %s completed\n", sessionName)
+				// Brief delay to let shell stabilize before next prompt
+				time.Sleep(2 * time.Second)
 				return "success", nil
 			}
 		case <-timeoutCh:
@@ -716,6 +718,10 @@ func (r *Runner) processEpic() error {
 		fmt.Printf("✓ Epic %s closed\n", epicID)
 	}
 
+	// Remove batch mode marker so wt done can clean up if run manually later
+	batchMarkerPath := filepath.Join(worktreePath, ".wt-batch-mode")
+	os.Remove(batchMarkerPath)
+
 	// Clean up state file
 	r.removeEpicState()
 
@@ -938,6 +944,12 @@ func (r *Runner) createEpicWorktree(epicID string, _ *project.Project) (string, 
 
 	if worktreePath == "" {
 		worktreePath = r.cfg.WorktreePath(sessionName)
+	}
+
+	// Create batch mode marker file so wt done knows not to clean up session
+	markerPath := filepath.Join(worktreePath, ".wt-batch-mode")
+	if err := os.WriteFile(markerPath, []byte(epicID), 0644); err != nil {
+		r.logger.Log("Warning: could not create batch mode marker: %v", err)
 	}
 
 	return sessionName, worktreePath, nil
@@ -1237,6 +1249,10 @@ func (r *Runner) resumeRun() error {
 	} else {
 		fmt.Printf("✓ Epic %s closed\n", state.EpicID)
 	}
+
+	// Remove batch mode marker so wt done can clean up if run manually later
+	batchMarkerPath := filepath.Join(state.Worktree, ".wt-batch-mode")
+	os.Remove(batchMarkerPath)
 
 	r.removeEpicState()
 	return nil
