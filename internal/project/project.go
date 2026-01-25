@@ -115,7 +115,8 @@ func (m *Manager) Get(name string) (*Project, error) {
 
 // AddOptions contains optional parameters for project registration.
 type AddOptions struct {
-	Branch string // Target branch (defaults to "main")
+	Branch    string // Target branch (defaults to "main")
+	MergeMode string // Merge mode: "pr-review" or "direct"
 }
 
 // Add registers a new project.
@@ -130,7 +131,7 @@ func (m *Manager) Add(name, repoPath string, opts *AddOptions) (*Project, error)
 	}
 
 	// Expand and validate repo path
-	expandedPath := expandPath(repoPath)
+	expandedPath := ExpandPath(repoPath)
 	if _, err := os.Stat(expandedPath); err != nil {
 		return nil, fmt.Errorf("repo path does not exist: %s", expandedPath)
 	}
@@ -171,13 +172,19 @@ func (m *Manager) Add(name, repoPath string, opts *AddOptions) (*Project, error)
 		}
 	}
 
+	// Determine merge mode
+	mergeMode := "pr-review"
+	if opts != nil && opts.MergeMode != "" {
+		mergeMode = opts.MergeMode
+	}
+
 	proj := &Project{
 		Name:          name,
 		Repo:          repoPath, // Store original path (may include ~)
 		RepoURL:       repoURL,
 		DefaultBranch: branch,
 		BeadsPrefix:   beadsPrefix,
-		MergeMode:     "pr-review",
+		MergeMode:     mergeMode,
 	}
 
 	if err := m.Save(proj); err != nil {
@@ -237,7 +244,7 @@ func (m *Manager) ConfigPath(name string) string {
 
 // RepoPath returns the expanded repo path for a project.
 func (p *Project) RepoPath() string {
-	return expandPath(p.Repo)
+	return ExpandPath(p.Repo)
 }
 
 // BeadsDir returns the beads directory for a project.
@@ -249,7 +256,8 @@ func (m *Manager) projectPath(name string) string {
 	return filepath.Join(m.projectsDir, name+".json")
 }
 
-func expandPath(path string) string {
+// ExpandPath expands ~ to the user's home directory.
+func ExpandPath(path string) string {
 	if strings.HasPrefix(path, "~/") {
 		home, _ := os.UserHomeDir()
 		return filepath.Join(home, path[2:])

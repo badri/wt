@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 
 	"github.com/charmbracelet/bubbles/table"
 
@@ -30,8 +32,9 @@ OPTIONS:
     -h, --help          Show this help
 
 ADD OPTIONS:
-    --branch, -b <branch>  Target branch for this project (default: main)
+    --branch, -b <branch>  Target branch for this project (default: detected or main)
                            Worktrees are created from and merged back to this branch
+    --non-interactive, -y  Skip interactive prompts (use defaults or provided flags)
 
 EXAMPLES:
     wt project                                       List all projects
@@ -97,7 +100,8 @@ func cmdProject(cfg *config.Config, args []string) error {
 }
 
 type projectAddFlags struct {
-	branch string
+	branch         string
+	nonInteractive bool
 }
 
 func parseProjectAddFlags(args []string) (string, string, projectAddFlags) {
@@ -113,6 +117,8 @@ func parseProjectAddFlags(args []string) (string, string, projectAddFlags) {
 				flags.branch = args[i+1]
 				i++
 			}
+		case "--non-interactive", "-y":
+			flags.nonInteractive = true
 		default:
 			positional = append(positional, args[i])
 		}
@@ -128,24 +134,163 @@ func parseProjectAddFlags(args []string) (string, string, projectAddFlags) {
 	return name, path, flags
 }
 
-func cmdProjectAdd(mgr *project.Manager, name, path string, flags projectAddFlags) error {
-	opts := &project.AddOptions{
-		Branch: flags.branch,
+// getCurrentBranch returns the current checked-out branch in the given repo path.
+func getCurrentBranch(repoPath string) string {
+	cmd := exec.Command("git", "-C", repoPath, "rev-parse", "--abbrev-ref", "HEAD")
+	output, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(output))
+}
+
+// readLine reads a line from stdin with the given prompt.
+func readLine(prompt string) (string, error) {
+	fmt.Print(prompt)
+	reader := bufio.NewReader(os.Stdin)
+	input, err := reader.ReadString('\n')
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(input), nil
+}
+
+// confirm prompts for yes/no confirmation. Returns true if user confirms.
+func confirm(prompt string, defaultYes bool) bool {
+	suffix := "[y/N]"
+	if defaultYes {
+		suffix = "[Y/n]"
+	}
+	fmt.Printf("%s %s ", prompt, suffix)
+
+	var response string
+	fmt.Scanln(&response)
+	response = strings.ToLower(strings.TrimSpace(response))
+
+	if response == "" {
+		return defaultYes
+	}
+	return response == "y" || response == "yes"
+}
+
+func cmdProjectAdd(mgr *project.Manager, name, repoPath string, flags projectAddFlags) error {
+	// Expand the path early for validation and branch detection
+	expandedPath := project.ExpandPath(repoPath)
+
+	// Validate the path exists and is a git repo
+	if _, err := os.Stat(expandedPath); err != nil {
+		return fmt.Errorf("repo path does not exist: %s", expandedPath)
+	}
+	gitDir := expandedPath + "/.git"
+	if _, err := os.Stat(gitDir); err != nil {
+		return fmt.Errorf("not a git repository: %s", expandedPath)
 	}
 
-	proj, err := mgr.Add(name, path, opts)
+	// Detect current branch
+	currentBranch := getCurrentBranch(expandedPath)
+
+	// Determine the branch to use
+	branch := flags.branch
+	if branch == "" && !flags.nonInteractive {
+		// Interactive branch selection
+		if currentBranch != "" {
+			fmt.Printf("\nDetected current branch: %s\n", currentBranch)
+			input, err := readLine(fmt.Sprintf("Use '%s' as the base branch? [Y/n/other]: ", currentBranch))
+			if err != nil {
+				return err
+			}
+
+			input = strings.ToLower(input)
+			if input == "" || input == "y" || input == "yes" {
+				branch = currentBranch
+			} else if input == "n" || input == "no" {
+				// Prompt for custom branch
+				branch, err = readLine("Enter base branch name: ")
+				if err != nil {
+					return err
+				}
+				if branch == "" {
+					branch = "main"
+					fmt.Printf("Using default: %s\n", branch)
+				}
+			} else {
+				// User entered a custom branch name directly
+				branch = input
+			}
+		} else {
+			// Could not detect branch, prompt for it
+			var err error
+			branch, err = readLine("Enter base branch name [main]: ")
+			if err != nil {
+				return err
+			}
+			if branch == "" {
+				branch = "main"
+			}
+		}
+	} else if branch == "" {
+		// Non-interactive mode with no branch specified: use current branch or default
+		if currentBranch != "" {
+			branch = currentBranch
+		} else {
+			branch = "main"
+		}
+	}
+
+	// Determine merge mode
+	mergeMode := "pr-review"
+	if !flags.nonInteractive {
+		fmt.Println("\nMerge mode determines how completed work is merged:")
+		fmt.Println("  [1] pr-review  - Create PR and merge after review (default)")
+		fmt.Println("  [2] direct     - Merge directly to branch without PR")
+
+		input, err := readLine("Select merge mode [1]: ")
+		if err != nil {
+			return err
+		}
+
+		switch strings.ToLower(input) {
+		case "2", "direct":
+			mergeMode = "direct"
+		default:
+			mergeMode = "pr-review"
+		}
+	}
+
+	// Show summary before registering
+	fmt.Println("\n--- Project Summary ---")
+	fmt.Printf("  Name:       %s\n", name)
+	fmt.Printf("  Repo:       %s\n", repoPath)
+	fmt.Printf("  Branch:     %s\n", branch)
+	fmt.Printf("  Merge mode: %s\n", mergeMode)
+
+	if !flags.nonInteractive {
+		fmt.Println()
+		if !confirm("Register this project?", true) {
+			fmt.Println("Cancelled.")
+			return nil
+		}
+	}
+
+	// Create add options
+	opts := &project.AddOptions{
+		Branch:    branch,
+		MergeMode: mergeMode,
+	}
+
+	proj, err := mgr.Add(name, repoPath, opts)
 	if err != nil {
 		return err
 	}
 
-	fmt.Printf("Project '%s' registered.\n", proj.Name)
+	fmt.Printf("\nProject '%s' registered.\n", proj.Name)
 	fmt.Printf("  Repo:         %s\n", proj.Repo)
 	if proj.RepoURL != "" {
 		fmt.Printf("  Remote:       %s\n", proj.RepoURL)
 	}
 	fmt.Printf("  Branch:       %s\n", proj.DefaultBranch)
 	fmt.Printf("  Beads prefix: %s\n", proj.BeadsPrefix)
-	fmt.Printf("  Merge mode:   %s (default)\n", proj.MergeMode)
+	fmt.Printf("  Merge mode:   %s\n", proj.MergeMode)
 	fmt.Printf("\nConfigure with: wt project config %s\n", proj.Name)
 
 	return nil
