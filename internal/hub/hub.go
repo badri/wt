@@ -8,8 +8,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/badri/wt/internal/config"
+	"github.com/badri/wt/internal/tmux"
 )
 
 const (
@@ -172,25 +174,42 @@ func create(cfg *config.Config, opts *Options) error {
 
 	// Get editor command from config
 	editorCmd := cfg.EditorCmd
+	// Check if there's pending handoff content to pick up
+	handoffPath := filepath.Join(cfg.ConfigDir(), "handoff.md")
+	hasHandoff := false
+	if _, err := os.Stat(handoffPath); err == nil {
+		hasHandoff = true
+	}
+
 	if editorCmd != "" {
 		// Append hub context prompt so Claude knows it's in hub mode
 		hubPrompt := `You are in the **hub session**. For queries about ready/available work, use ` + "`wt ready`" + ` (not bd ready) to see work across ALL registered projects. Prefer /wt skill over /beads:ready in this context.`
 
 		fullCmd := fmt.Sprintf("%s --append-system-prompt %q", editorCmd, hubPrompt)
 
-		// Check if there's pending handoff content to pick up
-		handoffPath := filepath.Join(cfg.ConfigDir(), "handoff.md")
-		if _, err := os.Stat(handoffPath); err == nil {
-			// Add initial prompt (-p) to trigger Claude to read and acknowledge handoff
-			handoffPrompt := "A handoff file exists. Please read ~/.config/wt/handoff.md and acknowledge the context from the previous session."
-			fullCmd = fullCmd + fmt.Sprintf(" -p %q", handoffPrompt)
-		}
-
 		// Send the editor command to start
 		// Prefix with space to avoid shell history
 		sendCmd := exec.Command("tmux", "send-keys", "-t", HubSessionName, " "+fullCmd, "Enter")
 		if err := sendCmd.Run(); err != nil {
 			return fmt.Errorf("starting editor in hub: %w", err)
+		}
+
+		// If there's a handoff, wait for Claude to be ready then nudge with the prompt
+		if hasHandoff {
+			go func() {
+				// Wait for Claude to be ready
+				if err := tmux.WaitForClaude(HubSessionName, 30*time.Second); err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: could not detect Claude for handoff nudge: %v\n", err)
+					return
+				}
+				// Give Claude a moment to fully initialize
+				time.Sleep(2 * time.Second)
+				// Send the handoff prompt
+				handoffPrompt := "A handoff file exists from a previous session. Please read ~/.config/wt/handoff.md and acknowledge the context."
+				if err := tmux.NudgeSession(HubSessionName, handoffPrompt); err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: could not send handoff prompt: %v\n", err)
+				}
+			}()
 		}
 	}
 
