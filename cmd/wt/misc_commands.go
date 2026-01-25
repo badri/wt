@@ -49,6 +49,11 @@ func parseAutoFlags(args []string) *auto.Options {
 				fmt.Sscanf(args[i+1], "%d", &opts.Limit)
 				i++
 			}
+		case "--epic", "-e":
+			if i+1 < len(args) {
+				opts.Epic = args[i+1]
+				i++
+			}
 		case "--dry-run":
 			opts.DryRun = true
 		case "--check":
@@ -57,6 +62,14 @@ func parseAutoFlags(args []string) *auto.Options {
 			opts.Stop = true
 		case "--force":
 			opts.Force = true
+		case "--pause-on-failure":
+			opts.PauseOnFailure = true
+		case "--skip-audit":
+			opts.SkipAudit = true
+		case "--resume":
+			opts.Resume = true
+		case "--abort":
+			opts.Abort = true
 		}
 	}
 	return opts
@@ -64,33 +77,67 @@ func parseAutoFlags(args []string) *auto.Options {
 
 // cmdAutoHelp prints help for the auto command
 func cmdAutoHelp() error {
-	help := `wt auto - Autonomous batch processing of beads
+	help := `wt auto - Autonomous batch processing of beads in an epic
 
 USAGE:
-    wt auto [options]
+    wt auto --epic <id> [options]
 
 DESCRIPTION:
-    Autonomously processes ready beads by spawning worker sessions,
-    monitoring their progress, and merging completed work.
+    Processes all ready beads in an epic sequentially in a single worktree.
+    Creates one PR/merge at the end instead of one per bead.
+
+    IMPORTANT: --epic is required. This prevents accidental batch processing
+    of all ready beads. Group related work into an epic first.
+
+CORE CONCEPT:
+    Instead of 1 worktree per bead (N PRs), creates 1 worktree for the epic:
+    1. Runs implicit audit (catches issues early)
+    2. Creates single worktree from project's default branch
+    3. Processes beads sequentially, each building on previous work
+    4. Creates 1 PR/merge at the end
 
 OPTIONS:
-    -p, --project <name>    Only process beads from specified project
+    -e, --epic <id>         (required) Epic ID to process
     -m, --merge-mode <mode> Merge mode: direct, pr-auto, pr-review
-    -n, --limit <count>     Maximum number of beads to process
-    --timeout <minutes>     Session timeout in minutes (default: 30)
-    --dry-run               Show what would be done without executing
-    --check                 Check status of running auto sessions
+    --timeout <minutes>     Per-bead timeout in minutes (default: 30)
+    --dry-run               Preview what would be processed (includes audit)
+    --pause-on-failure      Stop and preserve worktree if a bead fails
+    --skip-audit            Bypass implicit audit (use with caution)
+    --check                 Check status of running/paused auto session
+    --resume                Resume a paused or failed epic run
+    --abort                 Abort and clean up a paused/failed run
     --stop                  Stop the auto runner gracefully
     --force                 Force start even if another auto is running
 
+WORKFLOW:
+    1. Group work into an epic:
+       bd create "Documentation batch" -t epic
+       bd dep add wt-tcf wt-doc-epic
+       bd dep add wt-1a3 wt-doc-epic
+
+    2. Run batch processing:
+       wt auto --epic wt-doc-epic
+
+    3. If a bead fails with --pause-on-failure:
+       - Fix manually in the preserved worktree
+       - wt auto --resume    (continue from where it stopped)
+       - wt auto --abort     (clean up and abandon)
+
+IMPLICIT AUDIT:
+    Before starting, wt auto checks:
+    - All beads have descriptions
+    - No external blockers (beads outside the epic)
+    - Beads are ready for implementation
+
+    Use --skip-audit to bypass if you've already resolved warnings.
+
 EXAMPLES:
-    wt auto                         Start processing all ready beads
-    wt auto -p myproject            Process beads from myproject only
-    wt auto -n 3                    Process at most 3 beads
-    wt auto --dry-run               Preview what would be processed
-    wt auto --check                 Check auto runner status
-    wt auto --stop                  Stop the auto runner
-    wt auto --timeout 60            Set 60 minute timeout per session
+    wt auto --epic wt-doc-batch           Process beads in epic
+    wt auto --epic wt-xyz --dry-run       Preview without executing
+    wt auto --epic wt-xyz --pause-on-failure  Stop on first failure
+    wt auto --check                       Check status of current run
+    wt auto --resume                      Resume after failure
+    wt auto --abort                       Clean up failed run
 `
 	fmt.Print(help)
 	return nil
