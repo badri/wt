@@ -197,8 +197,10 @@ func create(cfg *config.Config, opts *Options) error {
 		// If there's a handoff, wait for Claude to be ready then nudge with the prompt
 		if hasHandoff {
 			go func() {
+				// Target pane 0 specifically (Claude pane, not watch pane)
+				targetPane := HubSessionName + ".0"
 				// Wait for Claude to be ready
-				if err := tmux.WaitForClaude(HubSessionName, 30*time.Second); err != nil {
+				if err := tmux.WaitForClaude(targetPane, 30*time.Second); err != nil {
 					fmt.Fprintf(os.Stderr, "Warning: could not detect Claude for handoff nudge: %v\n", err)
 					return
 				}
@@ -206,7 +208,7 @@ func create(cfg *config.Config, opts *Options) error {
 				time.Sleep(2 * time.Second)
 				// Send the handoff prompt
 				handoffPrompt := "A handoff file exists from a previous session. Please read ~/.config/wt/handoff.md and acknowledge the context."
-				if err := tmux.NudgeSession(HubSessionName, handoffPrompt); err != nil {
+				if err := tmux.NudgeSession(targetPane, handoffPrompt); err != nil {
 					fmt.Fprintf(os.Stderr, "Warning: could not send handoff prompt: %v\n", err)
 				}
 			}()
