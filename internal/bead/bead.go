@@ -374,19 +374,55 @@ func ShowFullInDir(beadID, beadsDir string) (*BeadInfoFull, error) {
 		projectDir = strings.TrimSuffix(projectDir, ".beads")
 	}
 
+	// Try JSON first
 	cmd := exec.Command("bd", "show", beadID, "--json")
 	if projectDir != "" {
 		cmd.Dir = projectDir
 	}
 	output, err := cmd.Output()
+	if err == nil {
+		var info BeadInfoFull
+		if err := json.Unmarshal(output, &info); err == nil {
+			return &info, nil
+		}
+	}
+
+	// Fallback to text parsing (bd show might not support --json)
+	cmd = exec.Command("bd", "show", beadID)
+	if projectDir != "" {
+		cmd.Dir = projectDir
+	}
+	output, err = cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("showing bead: %w", err)
+		return nil, fmt.Errorf("bead not found: %s", beadID)
 	}
 
-	var info BeadInfoFull
-	if err := json.Unmarshal(output, &info); err != nil {
-		return nil, fmt.Errorf("parsing bead info: %w", err)
+	// Parse text output
+	info := &BeadInfoFull{
+		ID:      beadID,
+		Project: extractProject(beadID),
 	}
 
-	return &info, nil
+	lines := strings.Split(string(output), "\n")
+	for _, line := range lines {
+		// Title line format: "○ wt-bqf · Phase 1: Core commands   [● P0 · OPEN]"
+		if strings.Contains(line, "·") && strings.Contains(line, beadID) {
+			parts := strings.Split(line, "·")
+			if len(parts) >= 2 {
+				title := strings.TrimSpace(parts[1])
+				// Remove status suffix like "[● P0 · OPEN]"
+				if idx := strings.Index(title, "["); idx > 0 {
+					title = strings.TrimSpace(title[:idx])
+				}
+				info.Title = title
+			}
+		}
+		// Description section
+		if strings.HasPrefix(strings.TrimSpace(line), "DESCRIPTION") {
+			// Next lines are description - simplified parsing
+			continue
+		}
+	}
+
+	return info, nil
 }
