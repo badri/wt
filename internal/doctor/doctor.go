@@ -45,6 +45,10 @@ func Run(cfg *config.Config) error {
 	orphanResults := checkOrphans(cfg)
 	results = append(results, orphanResults...)
 
+	// 7. Check CLAUDE.md configuration
+	claudeResults := checkClaudeMD()
+	results = append(results, claudeResults...)
+
 	// Print results
 	var hasErrors, hasWarnings bool
 	for _, r := range results {
@@ -379,6 +383,172 @@ func checkOrphans(cfg *config.Config) []CheckResult {
 	}
 
 	return results
+}
+
+// claudeMDHealthCheck validates the contents of a CLAUDE.md file
+func claudeMDHealthCheck(path string) (status string, message string, details []string) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return "warn", "cannot read", []string{fmt.Sprintf("Error: %v", err)}
+	}
+
+	size := len(content)
+	trimmed := strings.TrimSpace(string(content))
+
+	// Check if empty or only whitespace
+	if size == 0 || len(trimmed) == 0 {
+		return "warn", "empty file", []string{"CLAUDE.md exists but has no content"}
+	}
+
+	// Check if file is very large (> 50KB might overwhelm context)
+	const maxRecommendedSize = 50 * 1024
+	if size > maxRecommendedSize {
+		return "warn", fmt.Sprintf("large file (%d KB)", size/1024),
+			[]string{
+				"Large CLAUDE.md files may overwhelm AI context",
+				"Consider splitting into focused sections or removing verbose content",
+			}
+	}
+
+	// Check for minimal content (< 50 bytes of actual content is suspicious)
+	const minUsefulContent = 50
+	if len(trimmed) < minUsefulContent {
+		return "warn", "minimal content",
+			[]string{
+				fmt.Sprintf("Only %d bytes of content", len(trimmed)),
+				"Consider adding more detailed project guidelines",
+			}
+	}
+
+	// All checks passed
+	return "ok", "healthy", nil
+}
+
+func checkClaudeMD() []CheckResult {
+	var results []CheckResult
+
+	// 1. Check global ~/.claude/CLAUDE.md
+	home, err := os.UserHomeDir()
+	if err == nil {
+		globalClaudeDir := filepath.Join(home, ".claude")
+		globalClaudeMD := filepath.Join(globalClaudeDir, "CLAUDE.md")
+
+		if _, err := os.Stat(globalClaudeMD); os.IsNotExist(err) {
+			results = append(results, CheckResult{
+				Name:    "global CLAUDE.md",
+				Status:  "ok",
+				Message: "not configured (optional)",
+				Details: []string{fmt.Sprintf("Create %s for global instructions", globalClaudeMD)},
+			})
+		} else if err != nil {
+			results = append(results, CheckResult{
+				Name:    "global CLAUDE.md",
+				Status:  "warn",
+				Message: "cannot access",
+				Details: []string{fmt.Sprintf("Error: %v", err)},
+			})
+		} else {
+			// File exists, run health checks
+			status, message, details := claudeMDHealthCheck(globalClaudeMD)
+			results = append(results, CheckResult{
+				Name:    "global CLAUDE.md",
+				Status:  status,
+				Message: message,
+				Details: details,
+			})
+		}
+	}
+
+	// 2. Check project-level CLAUDE.md and .claude/ (only if in a git repo)
+	gitRoot := getGitRoot()
+	if gitRoot == "" {
+		// Not in a git repo, skip project checks
+		return results
+	}
+
+	// Check project CLAUDE.md
+	projectClaudeMD := filepath.Join(gitRoot, "CLAUDE.md")
+	if _, err := os.Stat(projectClaudeMD); os.IsNotExist(err) {
+		results = append(results, CheckResult{
+			Name:    "project CLAUDE.md",
+			Status:  "warn",
+			Message: "not found",
+			Details: []string{
+				"Consider adding CLAUDE.md with project guidelines",
+				fmt.Sprintf("Path: %s", projectClaudeMD),
+			},
+		})
+	} else if err != nil {
+		results = append(results, CheckResult{
+			Name:    "project CLAUDE.md",
+			Status:  "warn",
+			Message: "cannot access",
+			Details: []string{fmt.Sprintf("Error: %v", err)},
+		})
+	} else {
+		// File exists, run health checks
+		status, message, details := claudeMDHealthCheck(projectClaudeMD)
+		results = append(results, CheckResult{
+			Name:    "project CLAUDE.md",
+			Status:  status,
+			Message: message,
+			Details: details,
+		})
+	}
+
+	// Check project .claude/ directory
+	projectClaudeDir := filepath.Join(gitRoot, ".claude")
+	if info, err := os.Stat(projectClaudeDir); os.IsNotExist(err) {
+		results = append(results, CheckResult{
+			Name:    "project .claude/",
+			Status:  "ok",
+			Message: "not configured (optional)",
+			Details: []string{"Create .claude/ for MCP configs, hooks, or settings"},
+		})
+	} else if err != nil {
+		results = append(results, CheckResult{
+			Name:    "project .claude/",
+			Status:  "warn",
+			Message: "cannot access",
+			Details: []string{fmt.Sprintf("Error: %v", err)},
+		})
+	} else if !info.IsDir() {
+		results = append(results, CheckResult{
+			Name:    "project .claude/",
+			Status:  "warn",
+			Message: "exists but is not a directory",
+		})
+	} else {
+		// Check if it's a symlink (common in worktrees)
+		if info, err := os.Lstat(projectClaudeDir); err == nil {
+			if info.Mode()&os.ModeSymlink != 0 {
+				target, _ := os.Readlink(projectClaudeDir)
+				results = append(results, CheckResult{
+					Name:    "project .claude/",
+					Status:  "ok",
+					Message: fmt.Sprintf("symlink -> %s", target),
+				})
+			} else {
+				results = append(results, CheckResult{
+					Name:    "project .claude/",
+					Status:  "ok",
+					Message: "directory found",
+				})
+			}
+		}
+	}
+
+	return results
+}
+
+// getGitRoot returns the root of the current git repository, or empty string if not in a repo.
+func getGitRoot() string {
+	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	output, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(output))
 }
 
 func expandPath(path string) string {
