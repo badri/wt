@@ -287,6 +287,39 @@ func TestManager_Add_WithBranch(t *testing.T) {
 	}
 }
 
+func TestManager_Add_WithMergeMode(t *testing.T) {
+	cfg, _ := setupTestConfig(t)
+	repoDir := setupTestRepo(t)
+	mgr := NewManager(cfg)
+
+	// Test with explicit merge mode
+	opts := &AddOptions{Branch: "main", MergeMode: "direct"}
+	proj, err := mgr.Add("myproject", repoDir, opts)
+	if err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+
+	if proj.MergeMode != "direct" {
+		t.Errorf("expected merge mode 'direct', got %q", proj.MergeMode)
+	}
+}
+
+func TestManager_Add_DefaultMergeMode(t *testing.T) {
+	cfg, _ := setupTestConfig(t)
+	repoDir := setupTestRepo(t)
+	mgr := NewManager(cfg)
+
+	// Test with no merge mode specified (should default to pr-review)
+	proj, err := mgr.Add("myproject", repoDir, nil)
+	if err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+
+	if proj.MergeMode != "pr-review" {
+		t.Errorf("expected merge mode 'pr-review', got %q", proj.MergeMode)
+	}
+}
+
 func TestManager_Add_MultipleBranches(t *testing.T) {
 	cfg, _ := setupTestConfig(t)
 	repoDir := setupTestRepo(t)
