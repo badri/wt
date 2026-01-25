@@ -139,9 +139,8 @@ func NudgeSession(session, message string) error {
 	// 2. Wait for text to appear in input
 	time.Sleep(1 * time.Second)
 
-	// 3. Send Enter to submit
-	// Use empty string "" followed by Enter - more reliable than just "Enter"
-	enterCmd := exec.Command("tmux", "send-keys", "-t", session, "", "Enter")
+	// 3. Send Enter to submit (using C-m which is carriage return)
+	enterCmd := exec.Command("tmux", "send-keys", "-t", session, "C-m")
 	if err := enterCmd.Run(); err != nil {
 		return fmt.Errorf("sending Enter: %w", err)
 	}
