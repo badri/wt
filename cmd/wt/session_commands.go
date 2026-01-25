@@ -204,7 +204,7 @@ DESCRIPTION:
     progress to the hub or other monitoring tools.
 
 ARGUMENTS:
-    <status>            Status: ready, blocked, error, working, idle
+    <status>            Status: ready, blocked, error, working, idle, bead-done
 
 STATUS VALUES:
     ready       Work is complete, ready for review/merge
@@ -212,6 +212,7 @@ STATUS VALUES:
     error       An error occurred that needs attention
     working     Actively working on the task
     idle        Paused but not blocked
+    bead-done   Bead completed in batch mode (include summary for next bead)
 
 OPTIONS:
     -h, --help          Show this help
@@ -220,6 +221,7 @@ EXAMPLES:
     wt signal ready               Mark session as ready
     wt signal blocked "Waiting on API access"  Mark blocked with reason
     wt signal error "Tests failing"            Mark as error with message
+    wt signal bead-done "Added new feature X with tests"  Batch bead complete
 `
 	fmt.Print(help)
 	return nil
@@ -1548,14 +1550,15 @@ func cmdSignal(cfg *config.Config, args []string) error {
 
 	// Validate status
 	validStatuses := map[string]bool{
-		"working": true,
-		"ready":   true,
-		"blocked": true,
-		"error":   true,
-		"idle":    true,
+		"working":   true,
+		"ready":     true,
+		"blocked":   true,
+		"error":     true,
+		"idle":      true,
+		"bead-done": true,
 	}
 	if !validStatuses[status] {
-		return fmt.Errorf("invalid status: %s\nvalid statuses: working, ready, blocked, error, idle", status)
+		return fmt.Errorf("invalid status: %s\nvalid statuses: working, ready, blocked, error, idle, bead-done", status)
 	}
 
 	// Get optional message
