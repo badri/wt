@@ -108,7 +108,15 @@ func Close(beadID string) error {
 }
 
 func UpdateStatus(beadID, status string) error {
+	return UpdateStatusInDir(beadID, status, "")
+}
+
+// UpdateStatusInDir updates bead status in a specific project directory
+func UpdateStatusInDir(beadID, status, projectDir string) error {
 	cmd := exec.Command("bd", "update", beadID, "--status", status)
+	if projectDir != "" {
+		cmd.Dir = projectDir
+	}
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("updating bead status: %s: %w", string(output), err)
