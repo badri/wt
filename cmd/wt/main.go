@@ -152,6 +152,11 @@ func run() error {
 			return cmdBeadHelp()
 		}
 		return cmdBead(cfg, args[1:])
+	case "audit":
+		if len(args) < 2 || hasHelpFlag(args[1:]) {
+			return cmdAuditHelp()
+		}
+		return cmdAudit(cfg, args[1:])
 	default:
 		// Assume it's a session name or bead ID to switch to
 		return cmdSwitch(cfg, args[0])

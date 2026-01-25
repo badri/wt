@@ -556,6 +556,8 @@ PROJECT COMMANDS:
                             Options: --status <status>
     wt create <proj> <title> Create a new bead in project
                             Options: --description, --priority, --type
+    wt audit <bead>         Audit bead readiness for implementation
+                            Options: -i/--interactive, -p/--project
 
 HUB COMMANDS:
     wt hub                  Start or attach to hub session
