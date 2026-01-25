@@ -355,13 +355,16 @@ func respawnClaude(cfg *config.Config) error {
 		respawnCmd = fmt.Sprintf("cd %s && exec %s", cwd, editorCmd)
 	}
 
-	// Determine target pane - explicitly target session.0 when in hub session
-	// to avoid accidentally respawning the watch pane
+	// Respawn the current pane (where handoff is running from)
+	// Using TMUX_PANE ensures we respawn the correct pane even if pane indices
+	// have changed (e.g., if another pane was closed and indices renumbered)
+	currentPane := os.Getenv("TMUX_PANE")
 	var cmd *exec.Cmd
-	if inHub {
-		targetPane := sessionName + ".0"
-		cmd = exec.Command("tmux", "respawn-pane", "-k", "-t", targetPane, respawnCmd)
+	if currentPane != "" {
+		// Use the pane ID (e.g., %0, %1) which is stable unlike indices
+		cmd = exec.Command("tmux", "respawn-pane", "-k", "-t", currentPane, respawnCmd)
 	} else {
+		// Fallback: respawn current pane (no target = current)
 		cmd = exec.Command("tmux", "respawn-pane", "-k", respawnCmd)
 	}
 	return cmd.Run()
