@@ -194,25 +194,6 @@ func create(cfg *config.Config, opts *Options) error {
 			return fmt.Errorf("starting editor in hub: %w", err)
 		}
 
-		// If there's a handoff, wait for Claude to be ready then nudge with the prompt
-		if hasHandoff {
-			go func() {
-				// Target pane 0 specifically (Claude pane, not watch pane)
-				targetPane := HubSessionName + ".0"
-				// Wait for Claude to be ready
-				if err := tmux.WaitForClaude(targetPane, 30*time.Second); err != nil {
-					fmt.Fprintf(os.Stderr, "Warning: could not detect Claude for handoff nudge: %v\n", err)
-					return
-				}
-				// Give Claude a moment to fully initialize
-				time.Sleep(2 * time.Second)
-				// Send the handoff prompt
-				handoffPrompt := "A handoff file exists from a previous session. Please read ~/.config/wt/handoff.md and acknowledge the context."
-				if err := tmux.NudgeSession(targetPane, handoffPrompt); err != nil {
-					fmt.Fprintf(os.Stderr, "Warning: could not send handoff prompt: %v\n", err)
-				}
-			}()
-		}
 	}
 
 	// Create a right-side pane for wt watch (unless --no-watch)
@@ -238,6 +219,24 @@ func create(cfg *config.Config, opts *Options) error {
 	fmt.Printf("  Working directory: %s\n", homeDir)
 	if !opts.NoWatch {
 		fmt.Printf("  Watch dashboard: right pane\n")
+	}
+
+	// If there's a handoff, wait for Claude and nudge before attaching
+	if hasHandoff {
+		fmt.Printf("  Handoff detected: waiting for Claude...\n")
+		targetPane := HubSessionName + ".0"
+		if err := tmux.WaitForClaude(targetPane, 30*time.Second); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not detect Claude for handoff: %v\n", err)
+		} else {
+			// Give Claude a moment to fully initialize after Welcome screen
+			time.Sleep(2 * time.Second)
+			handoffPrompt := "A handoff file exists. Please read ~/.config/wt/handoff.md and acknowledge the context."
+			if err := tmux.NudgeSession(targetPane, handoffPrompt); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: could not send handoff prompt: %v\n", err)
+			} else {
+				fmt.Printf("  Handoff prompt sent.\n")
+			}
+		}
 	}
 
 	// Attach to the new session
