@@ -680,6 +680,11 @@ func (r *Runner) processEpic() error {
 		state.CurrentBead = b.ID
 		r.saveEpicState(state)
 
+		// Mark bead as in_progress so it doesn't show in `wt ready`
+		if err := bead.UpdateStatusInDir(b.ID, "in_progress", projectDir); err != nil {
+			r.logger.Log("Warning: could not mark bead %s as in_progress: %v", b.ID, err)
+		}
+
 		// Build batch-aware prompt for this bead (includes previous bead summaries)
 		prompt := r.buildEpicBeadPrompt(&b, sessionName, proj, i+1, len(beads), state)
 
@@ -1346,6 +1351,11 @@ func (r *Runner) resumeRun() error {
 
 		state.CurrentBead = b.ID
 		r.saveEpicState(state)
+
+		// Mark bead as in_progress so it doesn't show in `wt ready`
+		if err := bead.UpdateStatusInDir(b.ID, "in_progress", state.ProjectDir); err != nil {
+			r.logger.Log("Warning: could not mark bead %s as in_progress: %v", b.ID, err)
+		}
 
 		// Build batch-aware prompt (includes previous bead summaries)
 		prompt := r.buildEpicBeadPrompt(&b, state.SessionName, proj, beadNum, totalBeads, state)
