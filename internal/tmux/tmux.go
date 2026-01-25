@@ -157,28 +157,37 @@ func NudgeSession(session, message string) error {
 		return fmt.Errorf("pasting buffer: %w", err)
 	}
 
-	// 4. Wait for paste to complete
-	time.Sleep(500 * time.Millisecond)
+	// 4. Wait for paste to complete - give extra time for long pastes
+	time.Sleep(1 * time.Second)
 
-	// 5. Send Escape to exit vim INSERT mode if enabled (harmless in normal mode)
-	escCmd := exec.Command("tmux", "send-keys", "-t", session, "Escape")
-	_ = escCmd.Run()
-	time.Sleep(100 * time.Millisecond)
+	// 5. Verify paste succeeded by checking pane content
+	content, _ := CapturePane(session, 10)
+	if len(content) == 0 {
+		// Retry paste if pane appears empty
+		pasteCmd2 := exec.Command("tmux", "paste-buffer", "-t", session)
+		if err := pasteCmd2.Run(); err != nil {
+			return fmt.Errorf("retry pasting buffer: %w", err)
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
 
-	// 6. Send Enter with retry (critical for message submission)
+	// 6. Send Enter with retry and verification
+	// Note: Removed Escape key send - it was for vim mode but can interfere with Claude Code's input
 	var lastErr error
-	for attempt := range 3 {
+	for attempt := range 5 {
 		if attempt > 0 {
-			time.Sleep(200 * time.Millisecond)
+			time.Sleep(500 * time.Millisecond)
 		}
 		enterCmd := exec.Command("tmux", "send-keys", "-t", session, "Enter")
 		if err := enterCmd.Run(); err != nil {
 			lastErr = err
 			continue
 		}
+		// Give Claude time to process the Enter
+		time.Sleep(200 * time.Millisecond)
 		return nil
 	}
-	return fmt.Errorf("failed to send Enter after 3 attempts: %w", lastErr)
+	return fmt.Errorf("failed to send Enter after 5 attempts: %w", lastErr)
 }
 
 // WaitForClaude waits for Claude to be running in the session.
