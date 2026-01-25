@@ -34,14 +34,19 @@ func DefaultConfig() *Config {
 
 // Options holds CLI options for wt auto
 type Options struct {
-	Project   string
-	MergeMode string
-	DryRun    bool
-	Check     bool
-	Stop      bool
-	Force     bool
-	Timeout   int // minutes, 0 means use project default
-	Limit     int // max beads to process, 0 means no limit
+	Project        string
+	MergeMode      string
+	DryRun         bool
+	Check          bool
+	Stop           bool
+	Force          bool
+	Timeout        int    // minutes, 0 means use project default
+	Limit          int    // max beads to process, 0 means no limit
+	Epic           string // required: epic ID to process
+	PauseOnFailure bool   // stop and preserve worktree if bead fails
+	SkipAudit      bool   // bypass implicit audit
+	Resume         bool   // resume after failure
+	Abort          bool   // abort and clean up after failure
 }
 
 // Runner manages the auto execution loop
@@ -74,6 +79,16 @@ func (r *Runner) Run() error {
 		return r.signalStop()
 	}
 
+	// Handle --abort flag
+	if r.opts.Abort {
+		return r.abortRun()
+	}
+
+	// Require --epic flag (no longer allows processing all ready beads)
+	if r.opts.Epic == "" && !r.opts.Check {
+		return fmt.Errorf("--epic <id> is required\n\nwt auto now requires an epic to process. This prevents accidental batch processing.\n\nUsage:\n  wt auto --epic <epic-id>    Process all beads in an epic\n  wt auto --check             Check status of a running auto session\n\nExample:\n  bd create \"Documentation batch\" -t epic\n  bd dep add wt-tcf wt-doc-epic   # wt-tcf blocks wt-doc-epic (dep of epic)\n  bd dep add wt-1a3 wt-doc-epic\n  wt auto --epic wt-doc-epic")
+	}
+
 	// Initialize logger
 	logsDir := filepath.Join(r.cfg.ConfigDir(), "logs")
 	if err := os.MkdirAll(logsDir, 0755); err != nil {
@@ -87,6 +102,16 @@ func (r *Runner) Run() error {
 	defer logger.Close()
 	r.logger = logger
 
+	// Handle --check flag (status check)
+	if r.opts.Check {
+		return r.checkStatus()
+	}
+
+	// Handle --resume flag
+	if r.opts.Resume {
+		return r.resumeRun()
+	}
+
 	// Acquire lock
 	if err := r.acquireLock(); err != nil {
 		return err
@@ -99,31 +124,10 @@ func (r *Runner) Run() error {
 	// Setup signal handling
 	r.setupSignalHandler()
 
-	// Get projects to process
-	projects, err := r.getProjects()
-	if err != nil {
+	// Process the epic
+	if err := r.processEpic(); err != nil {
+		r.logger.Log("Error processing epic %s: %v", r.opts.Epic, err)
 		return err
-	}
-
-	if len(projects) == 0 {
-		fmt.Println("No projects to process.")
-		return nil
-	}
-
-	r.logger.Log("Starting auto run for %d project(s)", len(projects))
-
-	// Process each project
-	for _, proj := range projects {
-		if r.shouldStop() {
-			r.logger.Log("Stop signal received, exiting")
-			fmt.Println("Stop signal received, exiting after current project.")
-			break
-		}
-
-		if err := r.processProject(proj); err != nil {
-			r.logger.Log("Error processing project %s: %v", proj.Name, err)
-			fmt.Printf("Error processing project %s: %v\n", proj.Name, err)
-		}
 	}
 
 	r.logger.Log("Auto run complete")
@@ -370,7 +374,7 @@ func (r *Runner) buildPrompt(template string, b *bead.ReadyBead, sessionName str
 }
 
 // getAutoConfig gets auto configuration for a project
-func (r *Runner) getAutoConfig(proj *project.Project) *Config {
+func (r *Runner) getAutoConfig(_ *project.Project) *Config {
 	// For now, return defaults
 	// TODO: Load from project config when auto section is added
 	return DefaultConfig()
@@ -518,4 +522,762 @@ type LockInfo struct {
 	PID       int    `json:"pid"`
 	StartTime string `json:"start_time"`
 	Project   string `json:"project,omitempty"`
+	Epic      string `json:"epic,omitempty"`
+}
+
+// EpicState tracks the state of an epic batch run
+type EpicState struct {
+	EpicID         string   `json:"epic_id"`
+	Worktree       string   `json:"worktree"`
+	SessionName    string   `json:"session_name"`
+	Beads          []string `json:"beads"`
+	CompletedBeads []string `json:"completed_beads"`
+	CurrentBead    string   `json:"current_bead,omitempty"`
+	FailedBead     string   `json:"failed_bead,omitempty"`
+	FailureReason  string   `json:"failure_reason,omitempty"`
+	Status         string   `json:"status"` // running, paused, failed, completed
+	StartTime      string   `json:"start_time"`
+	ProjectDir     string   `json:"project_dir"`
+	MergeMode      string   `json:"merge_mode"`
+}
+
+// EpicAuditResult holds the result of auditing an epic
+type EpicAuditResult struct {
+	EpicID           string            `json:"epic_id"`
+	Ready            bool              `json:"ready"`
+	Beads            []string          `json:"beads"`
+	BeadTitles       map[string]string `json:"bead_titles"`
+	Issues           []string          `json:"issues"`
+	FileConflicts    []string          `json:"file_conflicts,omitempty"`
+	ExternalBlockers []string          `json:"external_blockers,omitempty"`
+	ProjectDir       string            `json:"project_dir"`
+}
+
+// processEpic processes all beads in an epic sequentially in a single worktree
+func (r *Runner) processEpic() error {
+	epicID := r.opts.Epic
+	r.logger.Log("Processing epic: %s", epicID)
+	fmt.Printf("Processing epic: %s\n", epicID)
+
+	// Run implicit audit unless skipped
+	if !r.opts.SkipAudit {
+		auditResult, err := r.auditEpic(epicID)
+		if err != nil {
+			return fmt.Errorf("audit failed: %w", err)
+		}
+
+		if !auditResult.Ready {
+			fmt.Println("\n=== Epic Audit Failed ===")
+			for _, issue := range auditResult.Issues {
+				fmt.Printf("  ✗ %s\n", issue)
+			}
+			fmt.Println("\nUse --skip-audit to bypass (not recommended)")
+			return fmt.Errorf("epic not ready for batch processing")
+		}
+
+		fmt.Printf("\n✓ Audit passed: %d bead(s) ready\n", len(auditResult.Beads))
+	}
+
+	// Get beads that block this epic (its dependencies)
+	beads, projectDir, err := r.getEpicBeads(epicID)
+	if err != nil {
+		return err
+	}
+
+	if len(beads) == 0 {
+		fmt.Println("No beads to process in epic.")
+		return nil
+	}
+
+	// Dry run mode
+	if r.opts.DryRun {
+		fmt.Println("\n=== Dry Run ===")
+		fmt.Printf("Would process %d bead(s) in epic %s:\n", len(beads), epicID)
+		for i, b := range beads {
+			fmt.Printf("  %d. %s: %s\n", i+1, b.ID, b.Title)
+		}
+		fmt.Println("\nWould create single worktree for sequential processing.")
+		return nil
+	}
+
+	// Get project for this epic
+	proj, err := r.getProjectForPath(projectDir)
+	if err != nil {
+		return fmt.Errorf("finding project: %w", err)
+	}
+
+	// Create single worktree for the epic
+	sessionName, worktreePath, err := r.createEpicWorktree(epicID, proj)
+	if err != nil {
+		return fmt.Errorf("creating worktree: %w", err)
+	}
+
+	fmt.Printf("\nCreated worktree: %s\n", worktreePath)
+	fmt.Printf("Session: %s\n", sessionName)
+
+	// Save epic state for resume/abort
+	state := &EpicState{
+		EpicID:      epicID,
+		Worktree:    worktreePath,
+		SessionName: sessionName,
+		Beads:       make([]string, len(beads)),
+		Status:      "running",
+		StartTime:   time.Now().Format(time.RFC3339),
+		ProjectDir:  projectDir,
+		MergeMode:   r.opts.MergeMode,
+	}
+	for i, b := range beads {
+		state.Beads[i] = b.ID
+	}
+	if err := r.saveEpicState(state); err != nil {
+		r.logger.Log("Warning: could not save epic state: %v", err)
+	}
+
+	// Get auto config
+	autoCfg := r.getAutoConfig(proj)
+	timeout := time.Duration(autoCfg.TimeoutMinutes) * time.Minute
+	if r.opts.Timeout > 0 {
+		timeout = time.Duration(r.opts.Timeout) * time.Minute
+	}
+
+	// Process beads sequentially in the shared worktree
+	fmt.Printf("\nProcessing %d bead(s) sequentially...\n", len(beads))
+	for i, b := range beads {
+		if r.shouldStop() {
+			r.logger.Log("Stop signal received, pausing epic")
+			state.Status = "paused"
+			state.CurrentBead = b.ID
+			r.saveEpicState(state)
+			fmt.Printf("\nPaused at bead %d/%d. Use 'wt auto --resume --epic %s' to continue.\n", i+1, len(beads), epicID)
+			return nil
+		}
+
+		fmt.Printf("\n=== Bead %d/%d: %s ===\n", i+1, len(beads), b.ID)
+		fmt.Printf("Title: %s\n", b.Title)
+
+		state.CurrentBead = b.ID
+		r.saveEpicState(state)
+
+		// Build prompt for this bead
+		prompt := r.buildEpicBeadPrompt(&b, sessionName, proj, i+1, len(beads))
+
+		// Run claude for this bead
+		outcome, err := r.runClaudeInSession(sessionName, autoCfg.Command, prompt, timeout)
+		if err != nil || (outcome != "success" && outcome != "dry-run") {
+			r.logger.Log("Bead %s failed: %s", b.ID, outcome)
+
+			if r.opts.PauseOnFailure {
+				state.Status = "failed"
+				state.FailedBead = b.ID
+				state.FailureReason = outcome
+				r.saveEpicState(state)
+				fmt.Printf("\n✗ Bead %s failed (%s). Worktree preserved.\n", b.ID, outcome)
+				fmt.Printf("Options:\n")
+				fmt.Printf("  - Fix manually in %s and run 'wt auto --resume --epic %s'\n", worktreePath, epicID)
+				fmt.Printf("  - Run 'wt auto --abort --epic %s' to clean up\n", epicID)
+				return fmt.Errorf("bead %s failed: %s", b.ID, outcome)
+			}
+
+			fmt.Printf("Warning: bead %s failed (%s), continuing...\n", b.ID, outcome)
+			continue
+		}
+
+		state.CompletedBeads = append(state.CompletedBeads, b.ID)
+		r.saveEpicState(state)
+		fmt.Printf("✓ Bead %s completed\n", b.ID)
+	}
+
+	// All beads completed - handle merge
+	state.Status = "completed"
+	r.saveEpicState(state)
+
+	fmt.Printf("\n=== All %d bead(s) completed ===\n", len(beads))
+
+	// Determine merge mode
+	mergeMode := r.opts.MergeMode
+	if mergeMode == "" {
+		mergeMode = proj.MergeMode
+	}
+	if mergeMode == "" {
+		mergeMode = r.cfg.DefaultMergeMode
+	}
+
+	if mergeMode != "none" {
+		fmt.Printf("Merge mode: %s\n", mergeMode)
+		// TODO: Implement merge/PR creation
+		fmt.Println("(Merge/PR creation not yet implemented)")
+	}
+
+	// Close the epic
+	if err := r.closeEpic(epicID, projectDir); err != nil {
+		r.logger.Log("Warning: could not close epic: %v", err)
+		fmt.Printf("Warning: could not auto-close epic: %v\n", err)
+	} else {
+		fmt.Printf("✓ Epic %s closed\n", epicID)
+	}
+
+	// Clean up state file
+	r.removeEpicState()
+
+	return nil
+}
+
+// auditEpic checks if an epic is ready for batch processing
+func (r *Runner) auditEpic(epicID string) (*EpicAuditResult, error) {
+	fmt.Printf("Auditing epic %s...\n", epicID)
+
+	result := &EpicAuditResult{
+		EpicID:     epicID,
+		Ready:      true,
+		BeadTitles: make(map[string]string),
+	}
+
+	// Get beads blocking this epic
+	beads, projectDir, err := r.getEpicBeads(epicID)
+	if err != nil {
+		return nil, err
+	}
+	result.ProjectDir = projectDir
+
+	if len(beads) == 0 {
+		result.Ready = false
+		result.Issues = append(result.Issues, "No beads found blocking this epic")
+		return result, nil
+	}
+
+	for _, b := range beads {
+		result.Beads = append(result.Beads, b.ID)
+		result.BeadTitles[b.ID] = b.Title
+	}
+
+	// Check: beads all from same project (already ensured by getEpicBeads)
+
+	// Check: no external blockers (beads should be ready)
+	for _, b := range beads {
+		blockers, err := r.getBeadBlockers(b.ID, projectDir)
+		if err != nil {
+			continue
+		}
+		for _, blocker := range blockers {
+			// Check if blocker is in our bead list (internal) or external
+			isInternal := false
+			for _, ob := range beads {
+				if ob.ID == blocker {
+					isInternal = true
+					break
+				}
+			}
+			if !isInternal {
+				result.Ready = false
+				result.ExternalBlockers = append(result.ExternalBlockers, fmt.Sprintf("%s blocked by %s", b.ID, blocker))
+				result.Issues = append(result.Issues, fmt.Sprintf("Bead %s has external blocker: %s", b.ID, blocker))
+			}
+		}
+	}
+
+	// Check: beads have descriptions (basic readiness)
+	for _, b := range beads {
+		if b.Description == "" {
+			result.Ready = false
+			result.Issues = append(result.Issues, fmt.Sprintf("Bead %s has no description", b.ID))
+		}
+	}
+
+	return result, nil
+}
+
+// getEpicBeads returns all beads that block the given epic (dependencies of the epic)
+func (r *Runner) getEpicBeads(epicID string) ([]bead.ReadyBead, string, error) {
+	// First, find which project contains this epic
+	projects, err := r.projMgr.List()
+	if err != nil {
+		return nil, "", fmt.Errorf("listing projects: %w", err)
+	}
+
+	for _, proj := range projects {
+		beadsDir := proj.BeadsDir()
+		projectDir := proj.RepoPath()
+
+		// Check if this epic exists in this project
+		cmd := exec.Command("bd", "show", epicID, "--json")
+		cmd.Dir = projectDir
+		output, err := cmd.Output()
+		if err != nil {
+			continue // Epic not in this project
+		}
+
+		// Parse to verify it's an epic
+		var infos []struct {
+			ID        string `json:"id"`
+			IssueType string `json:"issue_type"`
+		}
+		if err := json.Unmarshal(output, &infos); err != nil || len(infos) == 0 {
+			continue
+		}
+		if infos[0].IssueType != "epic" {
+			return nil, "", fmt.Errorf("%s is not an epic (type: %s)", epicID, infos[0].IssueType)
+		}
+
+		// Get dependencies that block this epic (beads where epic depends on them)
+		cmd = exec.Command("bd", "dep", "list", epicID, "--json", "--direction", "blocked-by")
+		cmd.Dir = projectDir
+		output, err = cmd.Output()
+		if err != nil {
+			// Try alternative: list all beads that this epic depends on
+			cmd = exec.Command("bd", "show", epicID, "--json")
+			cmd.Dir = projectDir
+			output, err = cmd.Output()
+			if err != nil {
+				return nil, projectDir, fmt.Errorf("getting epic dependencies: %w", err)
+			}
+		}
+
+		// Get ready beads from this project
+		readyBeads, err := bead.ReadyInDir(beadsDir)
+		if err != nil {
+			return nil, projectDir, fmt.Errorf("getting ready beads: %w", err)
+		}
+
+		// Parse dependencies
+		var deps []struct {
+			ID    string `json:"id"`
+			Title string `json:"title"`
+		}
+		json.Unmarshal(output, &deps)
+
+		// Filter ready beads to only those that are dependencies of the epic
+		var epicBeads []bead.ReadyBead
+		depSet := make(map[string]bool)
+		for _, d := range deps {
+			depSet[d.ID] = true
+		}
+
+		for _, b := range readyBeads {
+			if depSet[b.ID] {
+				epicBeads = append(epicBeads, b)
+			}
+		}
+
+		// If no deps found via dep command, assume all ready beads with matching prefix
+		if len(deps) == 0 && len(epicBeads) == 0 {
+			// Fall back to pattern matching: beads with same prefix
+			prefix := strings.Split(epicID, "-")[0]
+			for _, b := range readyBeads {
+				if strings.HasPrefix(b.ID, prefix+"-") && b.ID != epicID {
+					epicBeads = append(epicBeads, b)
+				}
+			}
+		}
+
+		return epicBeads, projectDir, nil
+	}
+
+	return nil, "", fmt.Errorf("epic %s not found in any registered project", epicID)
+}
+
+// getBeadBlockers returns IDs of beads that block the given bead
+func (r *Runner) getBeadBlockers(beadID, projectDir string) ([]string, error) {
+	cmd := exec.Command("bd", "dep", "list", beadID, "--json", "--direction", "blocked-by")
+	cmd.Dir = projectDir
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+
+	var deps []struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(output, &deps); err != nil {
+		return nil, err
+	}
+
+	var blockers []string
+	for _, d := range deps {
+		blockers = append(blockers, d.ID)
+	}
+	return blockers, nil
+}
+
+// createEpicWorktree creates a single worktree for processing an epic
+func (r *Runner) createEpicWorktree(epicID string, _ *project.Project) (string, string, error) {
+	// Generate a session name from epic ID
+	sessionName := strings.ReplaceAll(epicID, "-", "")
+	if len(sessionName) > 8 {
+		sessionName = sessionName[:8]
+	}
+	sessionName = "auto-" + sessionName
+
+	// Create worktree using wt new equivalent logic
+	cmd := exec.Command("wt", "new", epicID, "--no-switch", "--name", sessionName)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", "", fmt.Errorf("creating worktree: %s: %w", string(output), err)
+	}
+
+	// Parse session name and worktree path from output
+	lines := strings.Split(string(output), "\n")
+	var worktreePath string
+	for _, line := range lines {
+		if strings.Contains(line, "Worktree:") {
+			parts := strings.SplitN(line, ":", 2)
+			if len(parts) == 2 {
+				worktreePath = strings.TrimSpace(parts[1])
+			}
+		}
+		if strings.Contains(line, "Session") && strings.Contains(line, "ready") {
+			// Extract actual session name if different
+			start := strings.Index(line, "'")
+			if start >= 0 {
+				end := strings.Index(line[start+1:], "'")
+				if end >= 0 {
+					sessionName = line[start+1 : start+1+end]
+				}
+			}
+		}
+	}
+
+	if worktreePath == "" {
+		worktreePath = r.cfg.WorktreePath(sessionName)
+	}
+
+	return sessionName, worktreePath, nil
+}
+
+// buildEpicBeadPrompt builds the prompt for processing a bead within an epic
+func (r *Runner) buildEpicBeadPrompt(b *bead.ReadyBead, sessionName string, _ *project.Project, current, total int) string {
+	var sb strings.Builder
+
+	sb.WriteString(fmt.Sprintf("Work on bead %s: %s\n\n", b.ID, b.Title))
+
+	if b.Description != "" {
+		sb.WriteString(b.Description)
+		sb.WriteString("\n\n")
+	}
+
+	sb.WriteString(fmt.Sprintf("This is bead %d of %d in an automated batch.\n\n", current, total))
+
+	sb.WriteString("Workflow:\n")
+	sb.WriteString("1. Implement the task\n")
+	sb.WriteString("2. Commit your changes with descriptive message\n")
+	sb.WriteString("3. Run `wt done` to complete\n\n")
+
+	sb.WriteString("IMPORTANT: `wt done` handles everything:\n")
+	sb.WriteString("- Closes the bead\n")
+	sb.WriteString("- Signals completion to the batch runner\n\n")
+
+	sb.WriteString("Do NOT run `git push` or `bd close` separately.\n\n")
+
+	sb.WriteString("## Commit Message Format\n")
+	sb.WriteString("Include this footer in your commit messages:\n\n")
+	sb.WriteString("```\n")
+	sb.WriteString("<commit message>\n\n")
+	sb.WriteString("Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\n")
+	sb.WriteString(fmt.Sprintf("Session: %s\n", sessionName))
+	sb.WriteString("```\n")
+
+	return sb.String()
+}
+
+// getProjectForPath finds the project containing the given path
+func (r *Runner) getProjectForPath(path string) (*project.Project, error) {
+	projects, err := r.projMgr.List()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, proj := range projects {
+		if proj.RepoPath() == path || strings.HasPrefix(path, proj.RepoPath()) {
+			return proj, nil
+		}
+	}
+
+	return nil, fmt.Errorf("no project found for path: %s", path)
+}
+
+// closeEpic closes the epic bead
+func (r *Runner) closeEpic(epicID, projectDir string) error {
+	cmd := exec.Command("bd", "close", epicID)
+	cmd.Dir = projectDir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("closing epic: %s: %w", string(output), err)
+	}
+	return nil
+}
+
+// Epic state file management
+func (r *Runner) epicStateFile() string {
+	return filepath.Join(r.cfg.ConfigDir(), "auto-epic-state.json")
+}
+
+func (r *Runner) saveEpicState(state *EpicState) error {
+	data, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(r.epicStateFile(), data, 0644)
+}
+
+func (r *Runner) loadEpicState() (*EpicState, error) {
+	data, err := os.ReadFile(r.epicStateFile())
+	if err != nil {
+		return nil, err
+	}
+	var state EpicState
+	if err := json.Unmarshal(data, &state); err != nil {
+		return nil, err
+	}
+	return &state, nil
+}
+
+func (r *Runner) removeEpicState() {
+	os.Remove(r.epicStateFile())
+}
+
+// checkStatus shows the status of a running or paused auto session
+func (r *Runner) checkStatus() error {
+	// Check for epic state file
+	state, err := r.loadEpicState()
+	if err != nil {
+		// Check lock file
+		if _, err := os.Stat(r.lockFile); os.IsNotExist(err) {
+			fmt.Println("No wt auto session is running.")
+			return nil
+		}
+
+		// Read lock info
+		data, err := os.ReadFile(r.lockFile)
+		if err != nil {
+			return fmt.Errorf("reading lock file: %w", err)
+		}
+
+		var lock LockInfo
+		if err := json.Unmarshal(data, &lock); err != nil {
+			return fmt.Errorf("parsing lock file: %w", err)
+		}
+
+		fmt.Println("wt auto Status")
+		fmt.Println("--------------")
+		fmt.Printf("  PID:       %d\n", lock.PID)
+		fmt.Printf("  Started:   %s\n", lock.StartTime)
+		if lock.Epic != "" {
+			fmt.Printf("  Epic:      %s\n", lock.Epic)
+		}
+		if lock.Project != "" {
+			fmt.Printf("  Project:   %s\n", lock.Project)
+		}
+
+		if r.isProcessRunning(lock.PID) {
+			fmt.Printf("  Status:    running\n")
+		} else {
+			fmt.Printf("  Status:    stale (process not running)\n")
+		}
+		return nil
+	}
+
+	// Show epic state
+	fmt.Println("wt auto Epic Status")
+	fmt.Println("-------------------")
+	fmt.Printf("  Epic:       %s\n", state.EpicID)
+	fmt.Printf("  Status:     %s\n", state.Status)
+	fmt.Printf("  Worktree:   %s\n", state.Worktree)
+	fmt.Printf("  Session:    %s\n", state.SessionName)
+	fmt.Printf("  Started:    %s\n", state.StartTime)
+	fmt.Printf("  Progress:   %d/%d beads completed\n", len(state.CompletedBeads), len(state.Beads))
+
+	if state.CurrentBead != "" {
+		fmt.Printf("  Current:    %s\n", state.CurrentBead)
+	}
+	if state.FailedBead != "" {
+		fmt.Printf("  Failed:     %s (%s)\n", state.FailedBead, state.FailureReason)
+	}
+
+	fmt.Println("\nBeads:")
+	for i, beadID := range state.Beads {
+		status := "pending"
+		for _, completed := range state.CompletedBeads {
+			if completed == beadID {
+				status = "✓ completed"
+				break
+			}
+		}
+		if beadID == state.FailedBead {
+			status = "✗ failed"
+		} else if beadID == state.CurrentBead && state.Status == "running" {
+			status = "→ running"
+		}
+		fmt.Printf("  %d. %s [%s]\n", i+1, beadID, status)
+	}
+
+	return nil
+}
+
+// resumeRun resumes a paused or failed epic run
+func (r *Runner) resumeRun() error {
+	state, err := r.loadEpicState()
+	if err != nil {
+		return fmt.Errorf("no epic state found to resume. Start with: wt auto --epic <id>")
+	}
+
+	if state.Status == "completed" {
+		fmt.Println("Epic already completed. Nothing to resume.")
+		r.removeEpicState()
+		return nil
+	}
+
+	// Verify epic ID matches if provided
+	if r.opts.Epic != "" && r.opts.Epic != state.EpicID {
+		return fmt.Errorf("epic mismatch: state has %s, you specified %s", state.EpicID, r.opts.Epic)
+	}
+
+	fmt.Printf("Resuming epic %s...\n", state.EpicID)
+	fmt.Printf("  Status: %s\n", state.Status)
+	fmt.Printf("  Progress: %d/%d completed\n", len(state.CompletedBeads), len(state.Beads))
+
+	// Find where to resume
+	resumeIndex := 0
+	completedSet := make(map[string]bool)
+	for _, id := range state.CompletedBeads {
+		completedSet[id] = true
+	}
+
+	for i, id := range state.Beads {
+		if !completedSet[id] {
+			resumeIndex = i
+			break
+		}
+	}
+
+	fmt.Printf("  Resuming from bead %d: %s\n", resumeIndex+1, state.Beads[resumeIndex])
+
+	// Get remaining beads
+	var remainingBeads []bead.ReadyBead
+	for i := resumeIndex; i < len(state.Beads); i++ {
+		beadID := state.Beads[i]
+		// Fetch bead info
+		cmd := exec.Command("bd", "show", beadID, "--json")
+		cmd.Dir = state.ProjectDir
+		output, _ := cmd.Output()
+
+		var infos []bead.ReadyBead
+		json.Unmarshal(output, &infos)
+		if len(infos) > 0 {
+			remainingBeads = append(remainingBeads, infos[0])
+		} else {
+			remainingBeads = append(remainingBeads, bead.ReadyBead{ID: beadID})
+		}
+	}
+
+	// Get project
+	proj, err := r.getProjectForPath(state.ProjectDir)
+	if err != nil {
+		return fmt.Errorf("finding project: %w", err)
+	}
+
+	// Update state
+	state.Status = "running"
+	state.FailedBead = ""
+	state.FailureReason = ""
+	r.saveEpicState(state)
+
+	// Get auto config
+	autoCfg := r.getAutoConfig(proj)
+	timeout := time.Duration(autoCfg.TimeoutMinutes) * time.Minute
+	if r.opts.Timeout > 0 {
+		timeout = time.Duration(r.opts.Timeout) * time.Minute
+	}
+
+	// Process remaining beads
+	for i, b := range remainingBeads {
+		beadNum := resumeIndex + i + 1
+		totalBeads := len(state.Beads)
+
+		if r.shouldStop() {
+			state.Status = "paused"
+			state.CurrentBead = b.ID
+			r.saveEpicState(state)
+			fmt.Printf("\nPaused at bead %d/%d. Use 'wt auto --resume' to continue.\n", beadNum, totalBeads)
+			return nil
+		}
+
+		fmt.Printf("\n=== Bead %d/%d: %s ===\n", beadNum, totalBeads, b.ID)
+
+		state.CurrentBead = b.ID
+		r.saveEpicState(state)
+
+		prompt := r.buildEpicBeadPrompt(&b, state.SessionName, proj, beadNum, totalBeads)
+
+		outcome, err := r.runClaudeInSession(state.SessionName, autoCfg.Command, prompt, timeout)
+		if err != nil || (outcome != "success" && outcome != "dry-run") {
+			if r.opts.PauseOnFailure {
+				state.Status = "failed"
+				state.FailedBead = b.ID
+				state.FailureReason = outcome
+				r.saveEpicState(state)
+				return fmt.Errorf("bead %s failed: %s", b.ID, outcome)
+			}
+			fmt.Printf("Warning: bead %s failed (%s), continuing...\n", b.ID, outcome)
+			continue
+		}
+
+		state.CompletedBeads = append(state.CompletedBeads, b.ID)
+		r.saveEpicState(state)
+		fmt.Printf("✓ Bead %s completed\n", b.ID)
+	}
+
+	// All done
+	state.Status = "completed"
+	r.saveEpicState(state)
+
+	fmt.Printf("\n=== All beads completed ===\n")
+
+	// Close epic
+	if err := r.closeEpic(state.EpicID, state.ProjectDir); err != nil {
+		fmt.Printf("Warning: could not auto-close epic: %v\n", err)
+	} else {
+		fmt.Printf("✓ Epic %s closed\n", state.EpicID)
+	}
+
+	r.removeEpicState()
+	return nil
+}
+
+// abortRun aborts a paused or failed epic run and cleans up
+func (r *Runner) abortRun() error {
+	state, err := r.loadEpicState()
+	if err != nil {
+		return fmt.Errorf("no epic state found to abort")
+	}
+
+	// Verify epic ID if provided
+	if r.opts.Epic != "" && r.opts.Epic != state.EpicID {
+		return fmt.Errorf("epic mismatch: state has %s, you specified %s", state.EpicID, r.opts.Epic)
+	}
+
+	fmt.Printf("Aborting epic %s...\n", state.EpicID)
+	fmt.Printf("  Status: %s\n", state.Status)
+	fmt.Printf("  Completed: %d/%d beads\n", len(state.CompletedBeads), len(state.Beads))
+
+	// Kill tmux session if exists
+	if state.SessionName != "" {
+		fmt.Printf("  Killing session: %s\n", state.SessionName)
+		cmd := exec.Command("tmux", "kill-session", "-t", state.SessionName)
+		cmd.Run() // Ignore errors
+	}
+
+	// Remove worktree
+	if state.Worktree != "" {
+		fmt.Printf("  Removing worktree: %s\n", state.Worktree)
+		cmd := exec.Command("git", "worktree", "remove", state.Worktree, "--force")
+		cmd.Run() // Ignore errors
+	}
+
+	// Clean up state
+	r.removeEpicState()
+	r.releaseLock()
+
+	fmt.Println("\n✓ Epic run aborted and cleaned up.")
+	fmt.Printf("Note: %d bead(s) were completed before abort.\n", len(state.CompletedBeads))
+
+	return nil
 }
