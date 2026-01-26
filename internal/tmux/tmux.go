@@ -122,49 +122,76 @@ func SwitchClient(name string) error {
 }
 
 // NudgeSession sends a message to a tmux session with reliable delivery.
-// Uses send-keys -l (literal mode) for reliable text entry.
+// Uses paste-buffer for reliable text delivery.
 // Serialized via mutex to prevent interleaved keystrokes from concurrent calls.
-// Based on gastown's proven implementation.
 func NudgeSession(session, message string) error {
 	// Serialize access to prevent concurrent nudges from interleaving
 	nudgeMutex.Lock()
 	defer nudgeMutex.Unlock()
 
-	// 1. Send text in literal mode (handles special characters)
-	sendCmd := exec.Command("tmux", "send-keys", "-t", session, "-l", message)
-	if err := sendCmd.Run(); err != nil {
-		return fmt.Errorf("sending message: %w", err)
+	// 1. Write message to temp file
+	tmpFile, err := os.CreateTemp("", "wt-nudge-*.txt")
+	if err != nil {
+		return fmt.Errorf("creating temp file: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+	defer os.Remove(tmpPath)
+
+	if _, err := tmpFile.WriteString(message); err != nil {
+		tmpFile.Close()
+		return fmt.Errorf("writing temp file: %w", err)
+	}
+	tmpFile.Close()
+
+	// 2. Load into tmux buffer
+	loadCmd := exec.Command("tmux", "load-buffer", tmpPath)
+	if err := loadCmd.Run(); err != nil {
+		return fmt.Errorf("loading buffer: %w", err)
 	}
 
-	// 2. Wait for text to appear in input
-	time.Sleep(1 * time.Second)
+	// 3. Paste buffer to the target pane
+	pasteCmd := exec.Command("tmux", "paste-buffer", "-t", session)
+	if err := pasteCmd.Run(); err != nil {
+		return fmt.Errorf("pasting buffer to %s: %w", session, err)
+	}
 
-	// 3. Send Enter to submit (using C-m which is carriage return)
-	enterCmd := exec.Command("tmux", "send-keys", "-t", session, "C-m")
+	// 4. Wait then send Enter
+	time.Sleep(500 * time.Millisecond)
+	enterCmd := exec.Command("tmux", "send-keys", "-t", session, "Enter")
 	if err := enterCmd.Run(); err != nil {
-		return fmt.Errorf("sending Enter: %w", err)
+		return fmt.Errorf("sending Enter to %s: %w", session, err)
 	}
 
 	return nil
 }
 
-// WaitForClaude waits for Claude to be running in the session.
-// Returns nil when Claude is detected, or error on timeout.
+// WaitForClaude waits for Claude to be running AND ready for input.
+// Returns nil when Claude's prompt is detected, or error on timeout.
 func WaitForClaude(session string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
+
+	// First wait for the process to start
 	for time.Now().Before(deadline) {
 		cmd := exec.Command("tmux", "display-message", "-t", session, "-p", "#{pane_current_command}")
 		output, err := cmd.Output()
 		if err == nil {
 			command := strings.TrimSpace(string(output))
-			// Check if it's Claude (not a shell)
 			if command == "claude" || command == "node" {
-				return nil
+				break
 			}
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	return fmt.Errorf("timeout waiting for Claude to start")
+
+	// Then wait for Claude's prompt indicator (❯) to appear
+	for time.Now().Before(deadline) {
+		content, err := CapturePane(session, 20)
+		if err == nil && strings.Contains(content, "❯") {
+			return nil
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	return fmt.Errorf("timeout waiting for Claude prompt")
 }
 
 // CapturePane captures the visible content of a tmux session's pane.

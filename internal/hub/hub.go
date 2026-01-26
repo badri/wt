@@ -221,22 +221,20 @@ func create(cfg *config.Config, opts *Options) error {
 		fmt.Printf("  Watch dashboard: right pane\n")
 	}
 
-	// If there's a handoff, wait for Claude and nudge before attaching
+	// If there's a handoff, nudge AFTER attach using a background goroutine
+	// Must be after attach because Claude Code's TUI needs the terminal attached
 	if hasHandoff {
-		fmt.Printf("  Handoff detected: waiting for Claude...\n")
-		targetPane := HubSessionName + ".0"
-		if err := tmux.WaitForClaude(targetPane, 30*time.Second); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: could not detect Claude for handoff: %v\n", err)
-		} else {
-			// Give Claude a moment to fully initialize after Welcome screen
-			time.Sleep(2 * time.Second)
-			handoffPrompt := "A handoff file exists. Please read ~/.config/wt/handoff.md and acknowledge the context."
-			if err := tmux.NudgeSession(targetPane, handoffPrompt); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: could not send handoff prompt: %v\n", err)
-			} else {
-				fmt.Printf("  Handoff prompt sent.\n")
+		fmt.Printf("  Handoff detected.\n")
+		go func() {
+			// Wait for attach to complete and Claude to be ready
+			time.Sleep(5 * time.Second)
+			targetPane := HubSessionName + ".0"
+			if err := tmux.WaitForClaude(targetPane, 30*time.Second); err != nil {
+				return
 			}
-		}
+			handoffPrompt := "A handoff file exists. Please read ~/.config/wt/handoff.md and acknowledge the context."
+			_ = tmux.NudgeSession(targetPane, handoffPrompt)
+		}()
 	}
 
 	// Attach to the new session
