@@ -834,7 +834,8 @@ func (r *Runner) auditEpic(epicID string) (*EpicAuditResult, error) {
 		}
 		for _, blocker := range blockers {
 			// Check if blocker is in our bead list (internal) or external
-			isInternal := false
+			// Also skip if blocker is the epic itself (parent-child relationship)
+			isInternal := blocker == epicID
 			for _, ob := range beads {
 				if ob.ID == blocker {
 					isInternal = true
