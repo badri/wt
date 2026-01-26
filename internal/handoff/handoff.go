@@ -150,24 +150,32 @@ func collectContext(cfg *config.Config, opts *Options) (string, error) {
 			sb.WriteString("\n")
 		}
 
-		// Get ready beads
+		// Get ready beads with full details
 		readyBeads, err := bead.Ready()
 		if err == nil && len(readyBeads) > 0 {
 			sb.WriteString("### Ready Beads\n")
 			for _, b := range readyBeads {
-				sb.WriteString(fmt.Sprintf("- %s: %s (P%d)\n", b.ID, b.Title, b.Priority))
+				sb.WriteString(fmt.Sprintf("#### %s (P%d, %s)\n", b.ID, b.Priority, b.IssueType))
+				sb.WriteString(fmt.Sprintf("**%s**\n", b.Title))
+				if b.Description != "" {
+					sb.WriteString(fmt.Sprintf("%s\n", b.Description))
+				}
+				sb.WriteString("\n")
 			}
-			sb.WriteString("\n")
 		}
 
-		// Get in-progress beads
+		// Get in-progress beads with full details
 		inProgressBeads, err := bead.List("in_progress")
 		if err == nil && len(inProgressBeads) > 0 {
 			sb.WriteString("### In Progress\n")
 			for _, b := range inProgressBeads {
-				sb.WriteString(fmt.Sprintf("- %s: %s\n", b.ID, b.Title))
+				sb.WriteString(fmt.Sprintf("#### %s (P%d, %s)\n", b.ID, b.Priority, b.IssueType))
+				sb.WriteString(fmt.Sprintf("**%s**\n", b.Title))
+				if b.Description != "" {
+					sb.WriteString(fmt.Sprintf("%s\n", b.Description))
+				}
+				sb.WriteString("\n")
 			}
-			sb.WriteString("\n")
 		}
 	}
 
