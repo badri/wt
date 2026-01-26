@@ -346,13 +346,12 @@ func respawnClaude(cfg *config.Config) error {
 	sessionName := getTmuxSessionName()
 	inHub := sessionName == hub.HubSessionName || isSeanceHubSession()
 
-	// Build the prompt: hub context (if applicable) + handoff instruction
-	// The handoff prompt tells Claude to read the context file
-	prompt := HandoffPrompt
+	// Build the system prompt: hub context (if applicable)
+	// Use --append-system-prompt instead of -p to keep Claude interactive
+	// The handoff file detection in hub.go will nudge Claude to read it
 	if inHub {
-		prompt = HubPrompt + " " + HandoffPrompt
+		editorCmd = fmt.Sprintf("%s --append-system-prompt %q", editorCmd, HubPrompt)
 	}
-	editorCmd = fmt.Sprintf("%s -p %q", editorCmd, prompt)
 
 	// Build respawn command - start fresh Claude with same flags
 	// Set WT_HUB=1 explicitly so the new process has it (respawn-pane doesn't inherit session env)
@@ -367,6 +366,28 @@ func respawnClaude(cfg *config.Config) error {
 	// Using TMUX_PANE ensures we respawn the correct pane even if pane indices
 	// have changed (e.g., if another pane was closed and indices renumbered)
 	currentPane := os.Getenv("TMUX_PANE")
+	targetPane := currentPane
+	if targetPane == "" {
+		// Fallback to session.0 for hub
+		if inHub {
+			targetPane = sessionName + ".0"
+		}
+	}
+
+	// Spawn a detached background process to nudge after respawn
+	// Must be a separate process since respawn -k kills the current one
+	if inHub && targetPane != "" {
+		// Use shell to spawn background process that survives our death
+		// Sleep to let Claude start, then paste the handoff prompt
+		nudgeScript := fmt.Sprintf(
+			`sleep 7; `+
+				`echo "A handoff file exists. Please read ~/.config/wt/handoff.md and acknowledge the context." | `+
+				`tmux load-buffer -; tmux paste-buffer -t %s; sleep 1; tmux send-keys -t %s Enter`,
+			targetPane, targetPane)
+		bgCmd := exec.Command("sh", "-c", nudgeScript+" &")
+		_ = bgCmd.Start() // Don't wait - let it run in background
+	}
+
 	var cmd *exec.Cmd
 	if currentPane != "" {
 		// Use the pane ID (e.g., %0, %1) which is stable unlike indices
