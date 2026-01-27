@@ -9,6 +9,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/table"
 
+	"github.com/badri/wt/internal/auto"
 	"github.com/badri/wt/internal/bead"
 	"github.com/badri/wt/internal/config"
 	"github.com/badri/wt/internal/events"
@@ -29,6 +30,8 @@ type newFlags struct {
 	noSwitch    bool
 	forceSwitch bool
 	noTestEnv   bool
+	shell       bool // Start with shell only, don't launch Claude
+	noPrompt    bool // Start Claude but don't send initial prompt (for wt auto)
 }
 
 // cmdNewHelp shows detailed help for the new command
@@ -53,6 +56,8 @@ OPTIONS:
     --no-switch         Don't switch to the new session after creation
     --switch            Force switch even when running from hub
     --no-test-env       Skip test environment setup
+    --shell             Create session with shell only (don't start Claude)
+    --no-prompt         Start Claude but don't send initial prompt (for wt auto)
     -h, --help          Show this help
 
 EXAMPLES:
@@ -273,6 +278,10 @@ func parseNewFlags(args []string) (beadID string, flags newFlags) {
 			flags.forceSwitch = true
 		case "--no-test-env":
 			flags.noTestEnv = true
+		case "--shell":
+			flags.shell = true
+		case "--no-prompt":
+			flags.noPrompt = true
 		}
 	}
 	return
@@ -850,7 +859,12 @@ func cmdNew(cfg *config.Config, args []string) error {
 		PortOffset: portOffset,
 		PortEnv:    portEnv,
 	}
-	if err := tmux.NewSession(sessionName, worktreePath, beadsDir, cfg.EditorCmd, tmuxOpts); err != nil {
+	// When --shell flag is set, don't start Claude (pass empty editorCmd)
+	editorCmd := cfg.EditorCmd
+	if flags.shell {
+		editorCmd = ""
+	}
+	if err := tmux.NewSession(sessionName, worktreePath, beadsDir, editorCmd, tmuxOpts); err != nil {
 		// Cleanup worktree on failure
 		worktree.Remove(worktreePath)
 		return fmt.Errorf("creating tmux session: %w", err)
@@ -918,25 +932,31 @@ func cmdNew(cfg *config.Config, args []string) error {
 	fmt.Printf("  Worktree: %s\n", worktreePath)
 	fmt.Printf("  Branch:   %s\n", beadID)
 
-	// Wait for Claude to actually be running before sending prompt
-	fmt.Println("Waiting for Claude to start...")
-	if err := tmux.WaitForClaude(sessionName, 60*time.Second); err != nil {
-		fmt.Printf("Warning: %v (sending prompt anyway)\n", err)
-	}
+	// Skip Claude initialization when --shell flag is used
+	if !flags.shell {
+		// Wait for Claude to actually be running before sending prompt
+		fmt.Println("Waiting for Claude to start...")
+		if err := tmux.WaitForClaude(sessionName, 60*time.Second); err != nil {
+			fmt.Printf("Warning: %v (sending prompt anyway)\n", err)
+		}
 
-	// Accept the bypass permissions warning dialog if present
-	if err := tmux.AcceptBypassPermissionsWarning(sessionName); err != nil {
-		fmt.Printf("Warning: could not accept bypass warning: %v\n", err)
-	}
+		// Accept the bypass permissions warning dialog if present
+		if err := tmux.AcceptBypassPermissionsWarning(sessionName); err != nil {
+			fmt.Printf("Warning: could not accept bypass warning: %v\n", err)
+		}
 
-	// Additional delay for Claude to fully initialize its UI
-	time.Sleep(2 * time.Second)
+		// Additional delay for Claude to fully initialize its UI
+		time.Sleep(2 * time.Second)
 
-	// Send initial work prompt using reliable nudge pattern
-	fmt.Println("Sending initial prompt to worker...")
-	prompt := buildInitialPrompt(beadID, beadInfo.Title, beadInfo.Description, sessionName, proj)
-	if err := tmux.NudgeSession(sessionName, prompt); err != nil {
-		fmt.Printf("Warning: could not send initial prompt: %v\n", err)
+		// Send initial work prompt using reliable nudge pattern
+		// Skip if --no-prompt is used (wt auto sends its own batch-aware prompt)
+		if !flags.noPrompt {
+			fmt.Println("Sending initial prompt to worker...")
+			prompt := buildInitialPrompt(beadID, beadInfo.Title, beadInfo.Description, sessionName, proj)
+			if err := tmux.NudgeSession(sessionName, prompt); err != nil {
+				fmt.Printf("Warning: could not send initial prompt: %v\n", err)
+			}
+		}
 	}
 
 	// Determine if we should switch
@@ -1592,6 +1612,21 @@ func cmdSignal(cfg *config.Config, args []string) error {
 		return fmt.Errorf("not in a wt session. Run this from inside a session worktree")
 	}
 
+	// Special handling for bead-done in auto mode
+	if status == "bead-done" {
+		epicState, inAutoMode := auto.IsInAutoMode(cfg, cwd)
+		if inAutoMode {
+			fmt.Printf("✓ Bead complete in auto mode. Transitioning to next bead...\n")
+			if err := auto.HandleBeadDone(cfg, epicState, message); err != nil {
+				return fmt.Errorf("handling bead-done in auto mode: %w", err)
+			}
+			// Don't update session status to "bead-done" - let auto mode handle it
+			return nil
+		}
+		// Not in auto mode - just update status normally
+		fmt.Println("Note: Not in auto mode. Use 'wt done' to complete the session.")
+	}
+
 	// Update status
 	sess.Status = status
 	sess.StatusMessage = message
@@ -1723,22 +1758,27 @@ func buildInitialPrompt(beadID, title, description, sessionName string, proj *pr
 		mergeMode = proj.MergeMode
 	}
 
+	defaultBranch := "main"
+	if proj != nil && proj.DefaultBranch != "" {
+		defaultBranch = proj.DefaultBranch
+	}
+
 	switch mergeMode {
 	case "direct":
 		sb.WriteString(fmt.Sprintf("%d. Run `wt done` to complete\n", stepNum))
 		sb.WriteString("\nIMPORTANT: `wt done` handles everything:\n")
-		sb.WriteString("- Rebases on main\n")
+		sb.WriteString(fmt.Sprintf("- Rebases on %s\n", defaultBranch))
 		sb.WriteString("- Pushes your changes\n")
 		sb.WriteString("- Closes the bead\n")
 		sb.WriteString("- Cleans up the session\n")
 		sb.WriteString("\nDo NOT run `git push` or `bd close` separately.")
 	case "pr-auto":
-		sb.WriteString(fmt.Sprintf("%d. Create a PR with `gh pr create`\n", stepNum))
+		sb.WriteString(fmt.Sprintf("%d. Create a PR with `gh pr create --base %s`\n", stepNum, defaultBranch))
 		sb.WriteString("\nWhen finished, signal completion with the PR URL:\n")
 		sb.WriteString("  wt signal ready \"PR: <paste PR URL here>\"\n")
 		sb.WriteString("\nDo NOT run `wt done` - the hub will handle cleanup after merge.")
 	case "pr-review":
-		sb.WriteString(fmt.Sprintf("%d. Create a PR with `gh pr create`\n", stepNum))
+		sb.WriteString(fmt.Sprintf("%d. Create a PR with `gh pr create --base %s`\n", stepNum, defaultBranch))
 		sb.WriteString("\nWhen finished, signal completion with the PR URL:\n")
 		sb.WriteString("  wt signal ready \"PR: <paste PR URL here>\"\n")
 		sb.WriteString("\nDo NOT run `wt done` - the hub will handle cleanup after review.")
