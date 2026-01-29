@@ -1,86 +1,135 @@
 # Auto Mode
 
-**Auto mode** enables autonomous batch processing of ready beads. wt spawns workers, runs them to completion, and reports results.
+**Auto mode** enables autonomous sequential processing of beads within an epic. wt creates a single worktree, processes each bead in order, and reports results.
 
 ## Overview
 
-Auto mode is useful when you want to:
+Auto mode requires an epic. It processes the epic's child beads sequentially in one worktree, killing and restarting the Claude process between beads to prevent context rot.
 
-- Process multiple independent beads overnight
-- Run a batch of similar tasks
-- Maximize parallelism without manual intervention
+Use auto mode when you want to:
+
+- Process an epic's beads overnight without intervention
+- Run a batch of related tasks sequentially
+- Avoid manual session management for multi-bead epics
 
 ## Basic Usage
 
 ```bash
-# Process all ready beads
-wt auto
+# Process all beads in an epic
+wt auto --epic <epic-id>
 
 # Preview what would be processed
-wt auto --dry-run
+wt auto --epic <epic-id> --dry-run
+
+# Check status of a running auto session
+wt auto --check
 ```
 
 ## Options
 
 | Flag | Description |
 |------|-------------|
-| `--project` | Filter to specific project |
-| `--max` | Maximum concurrent sessions |
-| `--merge-mode` | Override merge mode for this run |
-| `--timeout` | Timeout per session |
+| `--epic <id>` | **(Required)** Epic ID to process |
+| `--project <name>` | Filter to specific project |
+| `--timeout <minutes>` | Timeout per bead (default: 30min) |
+| `--merge-mode <mode>` | Override merge mode for this run |
 | `--dry-run` | Preview without executing |
+| `--check` | Check status of running auto |
+| `--stop` | Gracefully stop after current bead |
+| `--pause-on-failure` | Stop and preserve worktree if a bead fails |
+| `--skip-audit` | Bypass the implicit audit check |
+| `--resume` | Resume after failure or pause |
+| `--abort` | Abort and clean up after failure |
+| `--force` | Override lock (risky) |
+
+## How It Works
+
+1. **Audit**: Validates the epic — checks beads have descriptions, no external blockers
+2. **Worktree**: Creates a single worktree and tmux session for the entire epic
+3. **Process**: Sends the first bead's prompt to the Claude session
+4. **Complete**: After each bead completes, captures commit info and marks it done
+5. **Refresh**: Kills the Claude process (not the session) to get fresh context
+6. **Next**: Sends the next bead's prompt into the same tmux session
+7. **Repeat**: Continues until all beads are processed
+8. **Merge**: Merges the worktree branch according to the merge mode
+
+All beads accumulate commits in the same worktree branch. The merge with the parent branch happens once at the end.
+
+## Epic Setup
+
+Before running auto, set up an epic with linked children:
+
+```bash
+# Create the epic
+bd create --title="Documentation batch" --type=epic
+
+# Create child beads
+bd create --title="Update API docs" --type=task
+bd create --title="Add examples" --type=task
+
+# Link children to epic
+bd dep add wt-child1 wt-epic-id
+bd dep add wt-child2 wt-epic-id
+```
 
 ## Examples
 
-### Process Specific Project
+### Process an Epic
 
 ```bash
-wt auto --project=myproject
+wt auto --epic wt-doc-batch
 ```
-
-### Limit Concurrency
-
-```bash
-wt auto --max=3
-```
-
-Only 3 workers will run at once. When one finishes, the next starts.
-
-### Set Timeout
-
-```bash
-wt auto --timeout=30m
-```
-
-Sessions that exceed 30 minutes are killed.
-
-### Override Merge Mode
-
-```bash
-wt auto --merge-mode=direct
-```
-
-All completions push directly to main (no PRs).
 
 ### Dry Run
 
 ```bash
-wt auto --dry-run
+wt auto --epic wt-doc-batch --dry-run
 ```
 
-Shows what would be processed without actually doing it:
+Shows what would be processed:
 
 ```
-Dry run - would process:
-  myproject-abc  Add auth flow
-  myproject-def  Fix login bug
-  myproject-ghi  Update tests
+=== Dry Run ===
+Would process 3 bead(s) in epic wt-doc-batch:
+  1. wt-abc: Update API docs
+  2. wt-def: Add examples
+  3. wt-ghi: Fix broken links
 
-Settings:
-  Max concurrent: 5
-  Merge mode: pr-review
-  Timeout: none
+Would create single worktree for sequential processing.
+Worker signals completion via: wt signal bead-done "<summary>"
 ```
+
+### Set Timeout
+
+```bash
+wt auto --epic wt-doc-batch --timeout 60
+```
+
+Each bead gets up to 60 minutes before being considered failed.
+
+### Pause on Failure
+
+```bash
+wt auto --epic wt-doc-batch --pause-on-failure
+```
+
+Stops processing and preserves the worktree if any bead fails, so you can inspect and fix.
+
+### Resume After Failure
+
+```bash
+wt auto --resume
+```
+
+Picks up where it left off, retrying failed beads.
+
+### Abort a Run
+
+```bash
+wt auto --abort
+```
+
+Cleans up worktree and state from a failed or paused run.
 
 ## Managing Auto Mode
 
@@ -92,10 +141,9 @@ wt auto --check
 
 Shows:
 
-- Running sessions
-- Completed count
-- Failed count
-- Queue remaining
+- Current epic and progress (e.g., 2/5 beads completed)
+- Which bead is currently being processed
+- Any failed beads
 
 ### Stop Processing
 
@@ -103,67 +151,49 @@ Shows:
 wt auto --stop
 ```
 
-- Stops spawning new sessions
-- Running sessions continue
-- Queue is cleared
+- Current bead continues to completion
+- No new beads are started
+- State is preserved for `--resume`
 
-## How It Works
+## Completion
 
-1. **Queue**: All ready beads are queued
-2. **Spawn**: Workers spawn up to `--max` limit
-3. **Monitor**: wt watches for completion/failure
-4. **Cycle**: As workers finish, new ones spawn
-5. **Report**: Summary shown when queue empties
-
-## Completion Criteria
-
-A session completes when:
-
-- Worker signals `ready`
-- `wt done` succeeds
-- PR is created (if applicable)
-
-A session fails when:
-
-- Worker signals `error`
-- Timeout exceeded
-- Worker process crashes
-
-## Results
-
-After auto mode finishes:
+After all beads are processed:
 
 ```
-Auto processing complete:
-  Completed: 8
+=== All 3 bead(s) processed ===
+  Completed: 3
+✓ Epic wt-doc-batch closed
+```
+
+If some beads failed:
+
+```
+=== All 3 bead(s) processed ===
+  Completed: 2
   Failed: 1
-  Skipped: 0
+    - wt-ghi: timeout
 
-Failed:
-  myproject-xyz - Timeout exceeded
-
-PRs created:
-  #123 myproject-abc Add auth flow
-  #124 myproject-def Fix login bug
-  ...
+✗ Epic wt-doc-batch NOT closed due to failed beads
+  Fix failures and run 'wt auto --resume --epic wt-doc-batch' to retry
+  Or run 'wt auto --abort --epic wt-doc-batch' to clean up
 ```
 
 ## Best Practices
 
-### 1. Use Dry Run First
+### 1. Audit Before Running
 
-Always preview what will be processed:
+Auto mode runs an implicit audit, but you can check manually:
 
 ```bash
-wt auto --dry-run
+wt auto --epic wt-doc-batch --dry-run
 ```
 
-### 2. Start Small
+### 2. Groom Beads Well
 
-Test with a small batch first:
+Each bead gets a fresh Claude context. Good descriptions make the difference:
 
 ```bash
-wt auto --max=2 --project=myproject
+bd show wt-abc   # Ensure description is clear and actionable
 ```
 
 ### 3. Set Reasonable Timeouts
@@ -171,74 +201,28 @@ wt auto --max=2 --project=myproject
 Prevent runaway sessions:
 
 ```bash
-wt auto --timeout=1h
+wt auto --epic wt-batch --timeout 45
 ```
 
-### 4. Check Dependencies
+### 4. Link Dependencies Properly
 
-Auto mode only processes ready beads. Check for blockers:
+Auto mode only finds children linked via `bd dep add`. Notes-only references are not detected:
 
 ```bash
-bd blocked
+bd dep add <child-id> <epic-id>
 ```
 
-If important beads are blocked, resolve dependencies first.
-
-### 5. Monitor Progress
-
-Keep an eye on progress:
+### 5. Use Pause on Failure for Important Work
 
 ```bash
-wt auto --check
-wt watch
+wt auto --epic wt-release --pause-on-failure
 ```
 
-### 6. Review Results
-
-After completion, review PRs:
-
-```bash
-gh pr list --author=@me
-```
+This lets you inspect failures before deciding to continue or abort.
 
 ## Limitations
 
-- **No intervention**: Auto mode doesn't handle blocked workers
-- **Simple tasks**: Best for straightforward, independent beads
-- **No dependencies**: Beads with dependencies may not work well
-- **Resource limits**: Too many concurrent sessions can exhaust resources
-
-## Use Cases
-
-### Batch Bug Fixes
-
-When you have many similar bugs:
-
-```bash
-wt auto --project=myproject --max=5
-```
-
-### Documentation Updates
-
-For documentation-heavy work:
-
-```bash
-wt auto --merge-mode=direct --project=docs
-```
-
-### Test Coverage
-
-Adding tests to multiple modules:
-
-```bash
-wt auto --timeout=30m --max=3
-```
-
-### Overnight Processing
-
-Start before leaving:
-
-```bash
-wt auto --project=myproject
-# Check results in the morning
-```
+- **Sequential only**: Beads are processed one at a time in a single worktree
+- **Epic required**: Cannot process arbitrary ready beads without an epic
+- **No intervention**: Auto mode doesn't handle interactive prompts or stuck workers
+- **Single lock**: Only one auto run at a time across all projects

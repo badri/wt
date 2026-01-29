@@ -435,42 +435,58 @@ wt seance hub --spawn       # Resume most recent hub in new tmux session
 
 ---
 
-## Autonomous Batch Processing
+## Autonomous Epic Processing
 
-Run beads overnight or unattended with `wt auto`.
+Process an epic's beads sequentially and unattended with `wt auto`.
 
 ### Basic Usage
 
 ```bash
-wt auto                     # Process all ready beads across all projects
-wt auto --project myapp     # Only beads from specific project
-wt auto --dry-run           # Preview what would run
-wt auto --check             # Validate beads are well-groomed
+wt auto --epic <epic-id>            # Process all beads in an epic
+wt auto --epic <epic-id> --dry-run  # Preview what would run
+wt auto --check                     # Check status of running auto
 ```
 
 ### How It Works
 
-1. Acquires lock (`~/.config/wt/auto.lock`) - only one auto run at a time
-2. Gets ready beads from all projects (or filtered by `--project`)
-3. For each bead:
-   - Creates session: `wt new <bead> --no-switch`
-   - Runs Claude with prompt template
+1. Acquires lock (`~/.config/wt/auto.lock`) — only one auto run at a time
+2. Audits the epic: validates beads have descriptions, no external blockers
+3. Creates a **single worktree and tmux session** for the entire epic
+4. For each bead (sequentially):
+   - Sends bead prompt (with epic context and prior bead summaries) to the session
    - Waits for completion or timeout
-   - Logs result to `~/.config/wt/logs/auto-<timestamp>.log`
-4. Checks for stop signal between beads
-5. Continues until all beads processed
+   - Captures commit info, marks bead done
+   - **Kills the Claude process** (not the session) for fresh context on next bead
+5. All commits accumulate in the same worktree branch
+6. Merges once at the end according to merge mode
 
 ### Flags
 
 | Flag | Description |
 |------|-------------|
+| `--epic <id>` | **(Required)** Epic to process |
 | `--project <name>` | Filter to specific project |
 | `--dry-run` | Show what would run without executing |
-| `--check` | Validate beads have title/description |
-| `--stop` | Signal running auto to stop after current bead |
-| `--timeout <minutes>` | Override default 30min timeout |
+| `--check` | Check status of running auto session |
+| `--stop` | Graceful stop after current bead |
+| `--timeout <minutes>` | Override default 30min timeout per bead |
 | `--merge-mode <mode>` | Override project merge mode |
+| `--pause-on-failure` | Stop and preserve worktree if bead fails |
+| `--skip-audit` | Bypass implicit audit (not recommended) |
+| `--resume` | Resume after failure or pause |
+| `--abort` | Abort and clean up |
 | `--force` | Override lock (risky) |
+
+### Epic Setup
+
+Link child beads to an epic before running:
+
+```bash
+bd create --title="Doc batch" --type=epic
+bd create --title="Update API docs" --type=task
+bd dep add wt-child wt-epic-id    # child depends on epic
+wt auto --epic wt-epic-id
+```
 
 ### Stopping a Running Auto
 
@@ -478,36 +494,36 @@ wt auto --check             # Validate beads are well-groomed
 wt auto --stop              # Graceful stop after current bead
 ```
 
-Or create stop file: `touch ~/.config/wt/stop-auto`
+The current bead continues to completion, then auto exits. Use `wt auto --resume` to continue later.
 
-The current bead continues to completion, then auto exits.
+### Failure Handling
 
-### Logs
-
-Auto runs are logged to `~/.config/wt/logs/auto-<timestamp>.log`:
-- Start/end times
-- Per-bead: ID, outcome (success/fail/timeout), duration
+```bash
+wt auto --epic wt-xyz --pause-on-failure  # Stop on first failure
+wt auto --resume                           # Retry after fixing
+wt auto --abort                            # Give up and clean up
+```
 
 ### When to Use
 
 - **Overnight batch**: Groom beads during day, run auto overnight
-- **CI integration**: Trigger auto from CI pipeline
-- **Backlog clearing**: Process accumulated ready beads
+- **Multi-step features**: Break an epic into ordered beads, process sequentially
+- **Documentation sprints**: Batch related doc tasks into an epic
 
 ### Example: Overnight Workflow
 
 ```bash
-# During day: groom beads
+# During day: groom beads and link to epic
 bd ready                    # Review what's ready
-bd show project-xyz         # Check each has good description
+bd show wt-abc              # Check each has good description
+bd dep add wt-abc wt-epic   # Link children
 
 # Before leaving
-wt auto --check             # Verify all groomed
-wt auto                     # Start batch run
+wt auto --epic wt-epic --dry-run   # Verify setup
+wt auto --epic wt-epic             # Start
 
 # Next morning
-cat ~/.config/wt/logs/auto-*.log | tail -50  # Check results
-wt                          # See any sessions still running
+wt auto --check             # See results
 ```
 
 ---
