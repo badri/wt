@@ -926,7 +926,11 @@ func (r *Runner) createEpicWorktree(epicID string, _ *project.Project) (string, 
 	// Create worktree using wt new with --no-prompt flag.
 	// Claude will start interactively but wt new won't send the generic prompt.
 	// We'll send our batch-aware epic prompt via NudgeSession after Claude initializes.
-	cmd := exec.Command("wt", "new", epicID, "--no-switch", "--name", sessionName, "--no-prompt")
+	args := []string{"new", epicID, "--no-switch", "--name", sessionName, "--no-prompt"}
+	if r.opts.Project != "" {
+		args = append(args, "--project", r.opts.Project)
+	}
+	cmd := exec.Command("wt", args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", "", fmt.Errorf("creating worktree: %s: %w", string(output), err)
