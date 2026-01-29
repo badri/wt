@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -1277,6 +1278,21 @@ func (r *Runner) resumeRun() error {
 		}
 
 		fmt.Printf("\n=== Bead %d/%d: %s ===\n", beadNum, totalBeads, b.ID)
+
+		// Re-check bead status (may have been closed by a previous bead's commit)
+		if info, err := bead.ShowInDir(b.ID, filepath.Join(state.ProjectDir, ".beads")); err == nil && info.Status == "closed" {
+			b.Status = "closed"
+		}
+
+		// Skip beads that are already closed (e.g. worker batched multiple closes in one commit)
+		if b.Status == "closed" {
+			fmt.Printf("  Bead %s already closed, skipping\n", b.ID)
+			if !slices.Contains(state.CompletedBeads, b.ID) {
+				state.CompletedBeads = append(state.CompletedBeads, b.ID)
+				r.saveEpicState(state)
+			}
+			continue
+		}
 
 		state.CurrentBead = b.ID
 		r.saveEpicState(state)
