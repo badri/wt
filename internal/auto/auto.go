@@ -826,18 +826,44 @@ func (r *Runner) getEpicBeads(epicID string) ([]bead.ReadyBead, string, error) {
 			return nil, "", fmt.Errorf("%s is not an epic (type: %s)", epicID, infos[0].IssueType)
 		}
 
-		// Get dependencies that block this epic (beads where epic depends on them)
-		cmd = exec.Command("bd", "dep", "list", epicID, "--json", "--direction", "blocked-by")
+		// Get epic's children via dependents from bd show --json
+		cmd = exec.Command("bd", "show", epicID, "--json")
 		cmd.Dir = projectDir
-		output, err = cmd.Output()
-		if err != nil {
-			// Try alternative: list all beads that this epic depends on
-			cmd = exec.Command("bd", "show", epicID, "--json")
-			cmd.Dir = projectDir
-			output, err = cmd.Output()
-			if err != nil {
-				return nil, projectDir, fmt.Errorf("getting epic dependencies: %w", err)
+		showOutput, showErr := cmd.Output()
+
+		var childIDs []string
+
+		if showErr == nil {
+			var showResults []struct {
+				Dependents []struct {
+					ID string `json:"id"`
+				} `json:"dependents"`
 			}
+			if err := json.Unmarshal(showOutput, &showResults); err == nil && len(showResults) > 0 {
+				for _, dep := range showResults[0].Dependents {
+					childIDs = append(childIDs, dep.ID)
+				}
+			}
+		}
+
+		// Fallback: try bd dep list --direction blocked-by
+		if len(childIDs) == 0 {
+			cmd = exec.Command("bd", "dep", "list", epicID, "--json", "--direction", "blocked-by")
+			cmd.Dir = projectDir
+			if depOutput, depErr := cmd.Output(); depErr == nil {
+				var deps []struct {
+					ID string `json:"id"`
+				}
+				if err := json.Unmarshal(depOutput, &deps); err == nil {
+					for _, d := range deps {
+						childIDs = append(childIDs, d.ID)
+					}
+				}
+			}
+		}
+
+		if len(childIDs) == 0 {
+			return nil, projectDir, fmt.Errorf("epic %s has no linked dependencies; add children with: bd dep add <child> %s", epicID, epicID)
 		}
 
 		// Get ready beads from this project
@@ -846,29 +872,17 @@ func (r *Runner) getEpicBeads(epicID string) ([]bead.ReadyBead, string, error) {
 			return nil, projectDir, fmt.Errorf("getting ready beads: %w", err)
 		}
 
-		// Parse dependencies
-		var deps []struct {
-			ID    string `json:"id"`
-			Title string `json:"title"`
+		// Filter ready beads to only those that are children of the epic
+		childSet := make(map[string]bool)
+		for _, id := range childIDs {
+			childSet[id] = true
 		}
-		json.Unmarshal(output, &deps)
 
-		// Filter ready beads to only those that are dependencies of the epic
 		var epicBeads []bead.ReadyBead
-		depSet := make(map[string]bool)
-		for _, d := range deps {
-			depSet[d.ID] = true
-		}
-
 		for _, b := range readyBeads {
-			if depSet[b.ID] {
+			if childSet[b.ID] {
 				epicBeads = append(epicBeads, b)
 			}
-		}
-
-		// If no deps found, the epic has no formally linked children
-		if len(deps) == 0 && len(epicBeads) == 0 {
-			return nil, projectDir, fmt.Errorf("epic %s has no linked dependencies; add children with: bd dep add <child> %s", epicID, epicID)
 		}
 
 		return epicBeads, projectDir, nil
