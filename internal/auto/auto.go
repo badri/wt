@@ -156,9 +156,14 @@ func (r *Runner) Run() error {
 		return r.checkStatus()
 	}
 
-	// Require --epic flag for all other operations
-	if r.opts.Epic == "" {
-		return fmt.Errorf("--epic <id> is required\n\nwt auto now requires an epic to process. This prevents accidental batch processing.\n\nUsage:\n  wt auto --epic <epic-id>    Process all beads in an epic\n  wt auto --check             Check status of a running auto session\n\nExample:\n  bd create \"Documentation batch\" -t epic\n  bd dep add wt-tcf wt-doc-epic   # wt-tcf blocks wt-doc-epic (dep of epic)\n  bd dep add wt-1a3 wt-doc-epic\n  wt auto --epic wt-doc-epic")
+	// Require --epic or --project for all other operations
+	if r.opts.Epic == "" && r.opts.Project == "" {
+		return fmt.Errorf("--epic <id> or --project <name> is required\n\nUsage:\n  wt auto --epic <epic-id>       Process all beads in an epic (single worktree)\n  wt auto --project <name>       Process ready beads serially (separate worktrees)\n  wt auto --check                Check status of a running auto session\n\nExample:\n  wt auto --epic wt-doc-epic\n  wt auto --project myapp")
+	}
+
+	// Project-only mode: serial queue processing
+	if r.opts.Epic == "" && r.opts.Project != "" {
+		return r.runProjectMode()
 	}
 
 	// Resolve project from epic if not already set
@@ -213,6 +218,54 @@ func (r *Runner) Run() error {
 	}
 
 	r.logger.Log("Auto run complete")
+	return nil
+}
+
+// runProjectMode processes ready beads for a project serially (separate worktrees per bead).
+func (r *Runner) runProjectMode() error {
+	r.setProjectPaths(r.opts.Project)
+
+	// Handle --abort (no state to abort in project mode)
+	if r.opts.Abort || r.opts.Resume {
+		return fmt.Errorf("--abort and --resume are only supported with --epic mode")
+	}
+
+	// Initialize logger
+	logsDir := filepath.Join(r.cfg.ConfigDir(), "logs")
+	if err := os.MkdirAll(logsDir, 0755); err != nil {
+		return fmt.Errorf("creating logs directory: %w", err)
+	}
+	logger, err := NewLogger(logsDir)
+	if err != nil {
+		return fmt.Errorf("creating logger: %w", err)
+	}
+	defer logger.Close()
+	r.logger = logger
+
+	// Acquire lock
+	if err := r.acquireLock(); err != nil {
+		return err
+	}
+	defer r.releaseLock()
+
+	os.Remove(r.stopFile)
+	r.setupSignalHandler()
+
+	// Resolve project
+	proj, err := r.projMgr.Get(r.opts.Project)
+	if err != nil {
+		return fmt.Errorf("project '%s' not found", r.opts.Project)
+	}
+
+	r.logger.Log("Starting project mode for %s", r.opts.Project)
+	fmt.Printf("Processing ready beads for project: %s\n", r.opts.Project)
+
+	if err := r.processProject(proj); err != nil {
+		r.logger.Log("Error processing project %s: %v", r.opts.Project, err)
+		return err
+	}
+
+	r.logger.Log("Project mode complete for %s", r.opts.Project)
 	return nil
 }
 
