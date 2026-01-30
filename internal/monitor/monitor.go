@@ -5,6 +5,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/badri/wt/internal/tmux"
 )
 
 // SessionStatus represents the current status of a session
@@ -82,6 +84,29 @@ func GetPRStatus(worktreePath, branch string) (status, url string) {
 		url = parts[1]
 	}
 	return status, url
+}
+
+// StuckState describes why a session is stuck
+type StuckState struct {
+	Type    string // "interrupted", "idle", "none"
+	Minutes int    // idle minutes (relevant for "idle" type)
+}
+
+// DetectStuckState checks if a session is stuck (interrupted or idle).
+func DetectStuckState(sessionName string, idleThresholdMinutes int) StuckState {
+	// Check pane content for "Interrupted" keyword
+	content, err := tmux.CapturePane(sessionName, 50)
+	if err == nil && strings.Contains(content, "Interrupted") {
+		return StuckState{Type: "interrupted"}
+	}
+
+	// Fall back to idle detection
+	idleMinutes := GetIdleMinutes(sessionName)
+	if idleMinutes >= idleThresholdMinutes {
+		return StuckState{Type: "idle", Minutes: idleMinutes}
+	}
+
+	return StuckState{Type: "none"}
 }
 
 // StatusIcon returns an icon for the status

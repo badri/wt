@@ -97,7 +97,7 @@ func run() error {
 		if hasHelpFlag(args[1:]) {
 			return cmdWatchHelp()
 		}
-		return cmdWatch(cfg)
+		return cmdWatch(cfg, args[1:])
 	case "seance":
 		if hasHelpFlag(args[1:]) {
 			return cmdSeanceHelp()

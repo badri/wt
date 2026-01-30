@@ -77,6 +77,11 @@ type keyMap struct {
 	Refresh key.Binding
 }
 
+var keyToggleNudge = key.NewBinding(
+	key.WithKeys("n"),
+	key.WithHelp("n", "toggle auto-nudge"),
+)
+
 var keys = keyMap{
 	Up: key.NewBinding(
 		key.WithKeys("up", "k"),
@@ -102,13 +107,15 @@ var keys = keyMap{
 
 // Session item for display
 type sessionItem struct {
-	name    string
-	bead    string
-	title   string
-	project string
-	status  string
-	message string
-	idle    int
+	name      string
+	bead      string
+	title     string
+	project   string
+	status    string
+	message   string
+	idle      int
+	stuckType string // "interrupted", "idle", or ""
+	nudgedAgo int    // minutes since last nudge, -1 if never
 }
 
 // Model
@@ -120,6 +127,8 @@ type watchModel struct {
 	height      int
 	lastRefresh time.Time
 	quitting    bool
+	autoNudge   bool
+	nudger      *monitor.Nudger
 }
 
 // Messages
@@ -134,7 +143,7 @@ func tickCmd() tea.Cmd {
 	})
 }
 
-func loadSessionsCmd(cfg *config.Config) tea.Cmd {
+func loadSessionsCmd(cfg *config.Config, autoNudge bool, nudger *monitor.Nudger) tea.Cmd {
 	return func() tea.Msg {
 		state, err := session.LoadState(cfg)
 		if err != nil {
@@ -155,15 +164,34 @@ func loadSessionsCmd(cfg *config.Config) tea.Cmd {
 				title = beadInfo.Title
 			}
 
-			items = append(items, sessionItem{
-				name:    name,
-				bead:    sess.Bead,
-				title:   title,
-				project: sess.Project,
-				status:  status,
-				message: sess.StatusMessage,
-				idle:    idle,
-			})
+			item := sessionItem{
+				name:      name,
+				bead:      sess.Bead,
+				title:     title,
+				project:   sess.Project,
+				status:    status,
+				message:   sess.StatusMessage,
+				idle:      idle,
+				nudgedAgo: -1,
+			}
+
+			// Detect stuck state and optionally nudge
+			stuck := monitor.DetectStuckState(name, 5)
+			if stuck.Type != "none" {
+				item.stuckType = stuck.Type
+				if autoNudge && nudger != nil {
+					nudger.TryNudge(name, stuck)
+				}
+			}
+
+			// Track last nudge time
+			if nudger != nil {
+				if last := nudger.LastNudgeTime(name); !last.IsZero() {
+					item.nudgedAgo = int(time.Since(last).Minutes())
+				}
+			}
+
+			items = append(items, item)
 		}
 
 		// Sort by name
@@ -185,17 +213,23 @@ func switchSessionCmd(sessionName string) tea.Cmd {
 }
 
 // Initialize model
-func newWatchModel(cfg *config.Config) watchModel {
+func newWatchModel(cfg *config.Config, autoNudge bool) watchModel {
+	var nudger *monitor.Nudger
+	if autoNudge {
+		nudger = monitor.NewNudger(cfg.ConfigDir())
+	}
 	return watchModel{
 		cfg:         cfg,
 		sessions:    []sessionItem{},
 		cursor:      0,
 		lastRefresh: time.Now(),
+		autoNudge:   autoNudge,
+		nudger:      nudger,
 	}
 }
 
 func (m watchModel) Init() tea.Cmd {
-	return tea.Batch(loadSessionsCmd(m.cfg), tickCmd())
+	return tea.Batch(loadSessionsCmd(m.cfg, m.autoNudge, m.nudger), tickCmd())
 }
 
 func (m watchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -225,7 +259,13 @@ func (m watchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case key.Matches(msg, keys.Refresh):
-			return m, loadSessionsCmd(m.cfg)
+			return m, loadSessionsCmd(m.cfg, m.autoNudge, m.nudger)
+
+		case key.Matches(msg, keyToggleNudge):
+			m.autoNudge = !m.autoNudge
+			if m.autoNudge && m.nudger == nil {
+				m.nudger = monitor.NewNudger(m.cfg.ConfigDir())
+			}
 		}
 
 	case tea.WindowSizeMsg:
@@ -234,7 +274,7 @@ func (m watchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tickMsg:
 		m.lastRefresh = time.Time(msg)
-		return m, tea.Batch(loadSessionsCmd(m.cfg), tickCmd())
+		return m, tea.Batch(loadSessionsCmd(m.cfg, m.autoNudge, m.nudger), tickCmd())
 
 	case sessionsMsg:
 		m.sessions = msg
@@ -327,6 +367,13 @@ func (m watchModel) View() string {
 				}
 				cardContent += cardLabelStyle.Render("Idle:    ") + cardValueStyle.Render(idleStr) + "\n"
 			}
+			if sess.stuckType != "" {
+				stuckStr := sess.stuckType
+				if sess.nudgedAgo >= 0 {
+					stuckStr += fmt.Sprintf(" (nudged %dm ago)", sess.nudgedAgo)
+				}
+				cardContent += cardLabelStyle.Render("Stuck:   ") + statusErrorStyle.Render(stuckStr) + "\n"
+			}
 
 			s += cardStyle.Render(cardContent)
 		}
@@ -337,6 +384,11 @@ func (m watchModel) View() string {
 	s += helpStyle.Render("↑/↓  navigate") + "\n"
 	s += helpStyle.Render("enter  switch to session") + "\n"
 	s += helpStyle.Render("r  refresh") + "\n"
+	nudgeLabel := "n  auto-nudge: off"
+	if m.autoNudge {
+		nudgeLabel = "n  auto-nudge: on"
+	}
+	s += helpStyle.Render(nudgeLabel) + "\n"
 	s += helpStyle.Render("q  quit")
 
 	return s
@@ -372,8 +424,8 @@ func truncateStr(s string, max int) string {
 }
 
 // Run the watch TUI
-func runWatchTUI(cfg *config.Config) error {
-	m := newWatchModel(cfg)
+func runWatchTUI(cfg *config.Config, autoNudge bool) error {
+	m := newWatchModel(cfg, autoNudge)
 	p := tea.NewProgram(m, tea.WithAltScreen())
 
 	_, err := p.Run()
@@ -381,6 +433,6 @@ func runWatchTUI(cfg *config.Config) error {
 }
 
 // cmdWatchTUI runs the new watch TUI
-func cmdWatchTUI(cfg *config.Config) error {
-	return runWatchTUI(cfg)
+func cmdWatchTUI(cfg *config.Config, autoNudge bool) error {
+	return runWatchTUI(cfg, autoNudge)
 }

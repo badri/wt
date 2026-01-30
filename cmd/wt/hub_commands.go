@@ -117,11 +117,13 @@ STATUS INDICATORS:
     ● red              Blocked or Error
 
 OPTIONS:
+    --auto-nudge       Enable auto-nudge for stuck/idle sessions
     -h, --help         Show this help
 
 EXAMPLES:
-    wt watch           Start the watch dashboard
-    wt hub --watch     Attach to hub and ensure watch pane exists
+    wt watch                Start the watch dashboard
+    wt watch --auto-nudge   Start with auto-nudge enabled
+    wt hub --watch          Attach to hub and ensure watch pane exists
 `
 	fmt.Print(help)
 	return nil
@@ -158,35 +160,42 @@ EXAMPLES:
 
 // cmdWatch displays a live dashboard of all sessions using the TUI.
 // When run from a worker session (not hub), it uses tmux popup to show the watch.
-func cmdWatch(cfg *config.Config) error {
+func cmdWatch(cfg *config.Config, args []string) error {
+	autoNudge := false
+	for _, arg := range args {
+		if arg == "--auto-nudge" {
+			autoNudge = true
+		}
+	}
+
 	// If we're already in a popup context, run directly
 	if os.Getenv("WT_WATCH_POPUP") == "1" {
-		return cmdWatchTUI(cfg)
+		return cmdWatchTUI(cfg, autoNudge)
 	}
 
 	// Not in tmux at all - run TUI directly
 	if os.Getenv("TMUX") == "" {
-		return cmdWatchTUI(cfg)
+		return cmdWatchTUI(cfg, autoNudge)
 	}
 
 	// Check if we're in the hub session
 	if hub.IsInHub() {
 		// In hub - run TUI directly
-		return cmdWatchTUI(cfg)
+		return cmdWatchTUI(cfg, autoNudge)
 	}
 
 	// Check if we're in a wt worker session
 	state, err := session.LoadState(cfg)
 	if err != nil {
 		// Can't determine - run TUI directly
-		return cmdWatchTUI(cfg)
+		return cmdWatchTUI(cfg, autoNudge)
 	}
 
 	// Get current tmux session name
 	currentSession := tmux.CurrentSession()
 	if currentSession == "" {
 		// Not in a named session - run TUI directly
-		return cmdWatchTUI(cfg)
+		return cmdWatchTUI(cfg, autoNudge)
 	}
 
 	// Check if current session is a wt worker
@@ -196,7 +205,7 @@ func cmdWatch(cfg *config.Config) error {
 	}
 
 	// In some other tmux session (not wt-related) - run TUI directly
-	return cmdWatchTUI(cfg)
+	return cmdWatchTUI(cfg, autoNudge)
 }
 
 // cmdWatchPopup shows watch in a tmux popup overlay
