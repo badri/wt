@@ -27,6 +27,10 @@ def main():
     # Get project directory
     cwd = os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd())
 
+    # Use local toolchain to avoid network downloads
+    env = os.environ.copy()
+    env["GOTOOLCHAIN"] = "local"
+
     messages = []
 
     # Run go fmt
@@ -34,6 +38,7 @@ def main():
         result = subprocess.run(
             ["go", "fmt", "./..."],
             cwd=cwd,
+            env=env,
             capture_output=True,
             text=True,
             timeout=30
@@ -48,6 +53,7 @@ def main():
         result = subprocess.run(
             ["go", "vet", "./..."],
             cwd=cwd,
+            env=env,
             capture_output=True,
             text=True,
             timeout=30
