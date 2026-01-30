@@ -689,42 +689,134 @@ func (r *Runner) processEpic() error {
 		state.BeadTitles[b.ID] = b.Title
 	}
 
-	// Start the first bead
-	firstBead := beads[0]
-	state.CurrentBead = firstBead.ID
-
 	if err := r.saveEpicState(state); err != nil {
 		return fmt.Errorf("saving epic state: %w", err)
 	}
 
-	// Mark first bead as in_progress
-	if err := bead.UpdateStatusInDir(firstBead.ID, "in_progress", projectDir); err != nil {
-		r.logger.Log("Warning: could not mark bead %s as in_progress: %v", firstBead.ID, err)
-	}
-
 	fmt.Printf("\n=== Starting Epic: %d bead(s) to process ===\n", len(beads))
-	fmt.Printf("Bead 1/%d: %s\n", len(beads), firstBead.ID)
-	fmt.Printf("Title: %s\n", firstBead.Title)
 
-	// Wait for Claude to be ready in the session
-	fmt.Println("\nWaiting for Claude to start...")
-	time.Sleep(5 * time.Second) // Give Claude time to initialize
-
-	// Build and send the first bead prompt
-	prompt := BuildEpicBeadPrompt(firstBead.ID, state, 1)
-
-	fmt.Println("Sending first bead prompt to worker...")
-	if err := nudgeSession(sessionName, prompt); err != nil {
-		return fmt.Errorf("sending prompt to session: %w", err)
+	// Get auto config for timeout
+	autoCfg := r.getAutoConfig(proj)
+	timeout := time.Duration(autoCfg.TimeoutMinutes) * time.Minute
+	if r.opts.Timeout > 0 {
+		timeout = time.Duration(r.opts.Timeout) * time.Minute
 	}
 
-	fmt.Println("\n=== Epic Started ===")
-	fmt.Printf("Session '%s' is now working on bead 1/%d.\n", sessionName, len(beads))
-	fmt.Println("\nThe worker will signal completion via:")
-	fmt.Println("  wt signal bead-done \"<summary of what was done>\"")
-	fmt.Println("\nThis will automatically transition to the next bead.")
-	fmt.Println("\nTo check status: wt auto --check")
-	fmt.Println("To stop: wt auto --stop")
+	// Process all beads sequentially, staying alive for the entire epic
+	for i, b := range beads {
+		beadNum := i + 1
+		totalBeads := len(beads)
+
+		if r.shouldStop() {
+			state.Status = "paused"
+			state.CurrentBead = b.ID
+			r.saveEpicState(state)
+			fmt.Printf("\nPaused at bead %d/%d. Use 'wt auto --resume' to continue.\n", beadNum, totalBeads)
+			return nil
+		}
+
+		fmt.Printf("\n=== Bead %d/%d: %s ===\n", beadNum, totalBeads, b.ID)
+
+		// Re-check bead status (may have been closed by a previous bead's commit)
+		if info, err := bead.ShowInDir(b.ID, filepath.Join(state.ProjectDir, ".beads")); err == nil && info.Status == "closed" {
+			b.Status = "closed"
+		}
+
+		// Skip beads that are already closed
+		if b.Status == "closed" {
+			fmt.Printf("  Bead %s already closed, skipping\n", b.ID)
+			if !slices.Contains(state.CompletedBeads, b.ID) {
+				state.CompletedBeads = append(state.CompletedBeads, b.ID)
+				r.saveEpicState(state)
+			}
+			continue
+		}
+
+		state.CurrentBead = b.ID
+		r.saveEpicState(state)
+
+		// Mark bead as in_progress
+		if err := bead.UpdateStatusInDir(b.ID, "in_progress", state.ProjectDir); err != nil {
+			r.logger.Log("Warning: could not mark bead %s as in_progress: %v", b.ID, err)
+		}
+
+		// Build batch-aware prompt
+		prompt := r.buildEpicBeadPrompt(&b, state.SessionName, proj, beadNum, totalBeads, state)
+
+		outcome, err := r.runClaudeInSession(state.SessionName, autoCfg.Command, prompt, timeout)
+		if err != nil || (outcome != "success" && outcome != "dry-run") {
+			if r.opts.PauseOnFailure {
+				state.Status = "failed"
+				state.FailedBead = b.ID
+				state.FailureReason = outcome
+				r.saveEpicState(state)
+				return fmt.Errorf("bead %s failed: %s", b.ID, outcome)
+			}
+			state.FailedBeads[b.ID] = outcome
+			r.saveEpicState(state)
+			fmt.Printf("Warning: bead %s failed (%s), continuing...\n", b.ID, outcome)
+			continue
+		}
+
+		// Capture commit info
+		commitHash, commitMsg, err := r.getLatestCommitInfo(state.Worktree)
+		if err != nil {
+			r.logger.Log("Warning: could not get commit info: %v", err)
+		} else {
+			state.BeadCommits = append(state.BeadCommits, BeadCommitInfo{
+				BeadID:     b.ID,
+				CommitHash: commitHash,
+				Summary:    commitMsg,
+				Title:      b.Title,
+			})
+		}
+
+		state.CompletedBeads = append(state.CompletedBeads, b.ID)
+		r.saveEpicState(state)
+		fmt.Printf("✓ Bead %s completed (commit: %s)\n", b.ID, commitHash)
+
+		// Kill Claude session to start fresh for next bead (prevents context rot)
+		if i < len(beads)-1 {
+			fmt.Printf("  Ending Claude session for fresh context on next bead...\n")
+			r.killClaudeSession(state.SessionName)
+			time.Sleep(2 * time.Second)
+		}
+	}
+
+	// Determine final status
+	allSucceeded := len(state.FailedBeads) == 0
+	if allSucceeded {
+		state.Status = "completed"
+	} else {
+		state.Status = "partial"
+	}
+	r.saveEpicState(state)
+
+	fmt.Printf("\n=== All %d bead(s) processed ===\n", len(state.Beads))
+	fmt.Printf("  Completed: %d\n", len(state.CompletedBeads))
+	if len(state.FailedBeads) > 0 {
+		fmt.Printf("  Failed: %d\n", len(state.FailedBeads))
+		for beadID, reason := range state.FailedBeads {
+			fmt.Printf("    - %s: %s\n", beadID, reason)
+		}
+	}
+
+	// Only close epic if all beads succeeded
+	if allSucceeded {
+		if err := r.closeEpic(state.EpicID, state.ProjectDir); err != nil {
+			fmt.Printf("Warning: could not auto-close epic: %v\n", err)
+		} else {
+			fmt.Printf("✓ Epic %s closed\n", state.EpicID)
+		}
+
+		batchMarkerPath := filepath.Join(state.Worktree, ".wt-batch-mode")
+		os.Remove(batchMarkerPath)
+		r.removeEpicState()
+	} else {
+		fmt.Printf("\n✗ Epic %s NOT closed due to failed beads\n", state.EpicID)
+		fmt.Printf("  Fix failures and run 'wt auto --resume --epic %s' to retry\n", state.EpicID)
+		fmt.Printf("  Or run 'wt auto --abort --epic %s' to clean up\n", state.EpicID)
+	}
 
 	return nil
 }
