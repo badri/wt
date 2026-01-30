@@ -14,6 +14,7 @@ import (
 
 	"github.com/badri/wt/internal/bead"
 	"github.com/badri/wt/internal/config"
+	"github.com/badri/wt/internal/msg"
 	"github.com/badri/wt/internal/project"
 )
 
@@ -56,6 +57,7 @@ type Runner struct {
 	projMgr    *project.Manager
 	opts       *Options
 	logger     *Logger
+	store      *msg.Store
 	lockFile   string
 	stopFile   string
 	stopSignal chan struct{}
@@ -194,6 +196,16 @@ func (r *Runner) Run() error {
 	defer logger.Close()
 	r.logger = logger
 
+	// Open message store for dual-write
+	storePath := filepath.Join(r.cfg.ConfigDir(), "messages.db")
+	store, err := msg.Open(storePath)
+	if err != nil {
+		r.logger.Log("Warning: could not open message store: %v", err)
+	} else {
+		r.store = store
+		defer store.Close()
+	}
+
 	// Handle --resume flag (needs project resolved for state file)
 	if r.opts.Resume {
 		return r.resumeRun()
@@ -241,6 +253,16 @@ func (r *Runner) runProjectMode() error {
 	}
 	defer logger.Close()
 	r.logger = logger
+
+	// Open message store for dual-write
+	storePath := filepath.Join(r.cfg.ConfigDir(), "messages.db")
+	store, err := msg.Open(storePath)
+	if err != nil {
+		r.logger.Log("Warning: could not open message store: %v", err)
+	} else {
+		r.store = store
+		defer store.Close()
+	}
 
 	// Acquire lock
 	if err := r.acquireLock(); err != nil {
@@ -916,11 +938,22 @@ func (r *Runner) processEpic() error {
 			r.logger.Log("Warning: could not mark bead %s as in_progress: %v", b.ID, err)
 		}
 
+		// Dual-write: send TASK message
+		if r.store != nil {
+			taskBody, _ := json.Marshal(msg.TaskBody{BeadID: b.ID, Title: b.Title, BeadNum: beadNum, Total: totalBeads})
+			r.store.Send(&msg.Message{Subject: msg.SubjectTask, From: "orchestrator", To: state.SessionName, Body: string(taskBody), ThreadID: epicID})
+		}
+
 		// Build batch-aware prompt
 		prompt := r.buildEpicBeadPrompt(&b, state.SessionName, proj, beadNum, totalBeads, state)
 
 		outcome, err := r.runClaudeInSession(state.SessionName, autoCfg.Command, prompt, timeout)
 		if err != nil || (outcome != "success" && outcome != "dry-run") {
+			// Dual-write: send STUCK message
+			if r.store != nil {
+				stuckBody, _ := json.Marshal(msg.StuckBody{BeadID: b.ID, Reason: outcome, Needs: "abort"})
+				r.store.Send(&msg.Message{Subject: msg.SubjectStuck, From: state.SessionName, To: "orchestrator", Body: string(stuckBody), ThreadID: epicID})
+			}
 			if r.opts.PauseOnFailure {
 				state.Status = "failed"
 				state.FailedBead = b.ID
@@ -950,6 +983,12 @@ func (r *Runner) processEpic() error {
 		state.CompletedBeads = append(state.CompletedBeads, b.ID)
 		r.saveEpicState(state)
 		fmt.Printf("✓ Bead %s completed (commit: %s)\n", b.ID, commitHash)
+
+		// Dual-write: send DONE message
+		if r.store != nil {
+			doneBody, _ := json.Marshal(msg.DoneBody{BeadID: b.ID, CommitHash: commitHash, Summary: commitMsg})
+			r.store.Send(&msg.Message{Subject: msg.SubjectDone, From: state.SessionName, To: "orchestrator", Body: string(doneBody), ThreadID: epicID})
+		}
 
 		// Ensure Claude has exited before starting next bead (prevents pasting into REPL)
 		if i < len(beads)-1 {
@@ -1676,6 +1715,12 @@ func (r *Runner) resumeRun() error {
 		r.saveEpicState(state)
 		fmt.Printf("✓ Bead %s completed (commit: %s)\n", b.ID, commitHash)
 
+		// Dual-write: send DONE message
+		if r.store != nil {
+			doneBody, _ := json.Marshal(msg.DoneBody{BeadID: b.ID, CommitHash: commitHash, Summary: commitMsg})
+			r.store.Send(&msg.Message{Subject: msg.SubjectDone, From: state.SessionName, To: "orchestrator", Body: string(doneBody), ThreadID: state.EpicID})
+		}
+
 		// Ensure Claude has exited before starting next bead (prevents pasting into REPL)
 		// Only if there are more beads to process
 		if i < len(remainingBeads)-1 {
@@ -1921,6 +1966,14 @@ func postBeadHousekeeping(cfg *config.Config, state *EpicState, summary string) 
 			Title:      state.BeadTitles[currentBead],
 		})
 		fmt.Printf("  Commit: %s\n", commitHash)
+	}
+
+	// Dual-write: send DONE message to store
+	storePath := filepath.Join(cfg.ConfigDir(), "messages.db")
+	if store, err := msg.Open(storePath); err == nil {
+		doneBody, _ := json.Marshal(msg.DoneBody{BeadID: currentBead, CommitHash: commitHash, Summary: commitMsg})
+		store.Send(&msg.Message{Subject: msg.SubjectDone, From: state.SessionName, To: "orchestrator", Body: string(doneBody), ThreadID: state.EpicID})
+		store.Close()
 	}
 
 	// Mark bead as complete in state

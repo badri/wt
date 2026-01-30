@@ -159,6 +159,37 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
+// TaskBody is sent by the orchestrator to assign a bead.
+type TaskBody struct {
+	BeadID  string   `json:"bead_id"`
+	Title   string   `json:"title"`
+	Prompt  string   `json:"prompt,omitempty"`
+	BeadNum int      `json:"bead_num"`
+	Total   int      `json:"total"`
+	Prior   []string `json:"prior_summaries,omitempty"`
+}
+
+// DoneBody is sent by the worker on completion.
+type DoneBody struct {
+	BeadID     string `json:"bead_id"`
+	CommitHash string `json:"commit_hash"`
+	Summary    string `json:"summary"`
+}
+
+// StuckBody is sent by the worker when it can't proceed.
+type StuckBody struct {
+	BeadID string `json:"bead_id"`
+	Reason string `json:"reason"`
+	Needs  string `json:"needs"` // "guidance", "dependency", "abort"
+}
+
+// ProgressBody is sent periodically by the worker.
+type ProgressBody struct {
+	BeadID  string `json:"bead_id"`
+	Percent int    `json:"percent,omitempty"`
+	Status  string `json:"status"`
+}
+
 func scanMessages(rows *sql.Rows) ([]Message, error) {
 	var msgs []Message
 	for rows.Next() {
