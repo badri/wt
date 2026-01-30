@@ -147,6 +147,11 @@ func run() error {
 			return cmdAutoHelp()
 		}
 		return cmdAuto(cfg, args[1:])
+	case "msg":
+		if hasHelpFlag(args[1:]) {
+			return cmdMsgHelp()
+		}
+		return cmdMsg(cfg, args[1:])
 	case "events":
 		if hasHelpFlag(args[1:]) {
 			return cmdEventsHelp()
