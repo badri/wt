@@ -63,31 +63,117 @@ type Runner struct {
 
 // NewRunner creates a new auto runner
 func NewRunner(cfg *config.Config, opts *Options) *Runner {
-	return &Runner{
+	r := &Runner{
 		cfg:        cfg,
 		projMgr:    project.NewManager(cfg),
 		opts:       opts,
-		lockFile:   filepath.Join(cfg.ConfigDir(), "auto.lock"),
-		stopFile:   filepath.Join(cfg.ConfigDir(), "stop-auto"),
 		stopSignal: make(chan struct{}, 1),
 	}
+	// Set per-project paths if project is known, otherwise use legacy global paths
+	r.setProjectPaths(opts.Project)
+	return r
+}
+
+// setProjectPaths sets lock/stop file paths based on project name.
+// If projectName is empty, uses legacy global paths for backwards compatibility.
+func (r *Runner) setProjectPaths(projectName string) {
+	if projectName != "" {
+		r.lockFile = filepath.Join(r.cfg.ConfigDir(), fmt.Sprintf("auto-%s.lock", projectName))
+		r.stopFile = filepath.Join(r.cfg.ConfigDir(), fmt.Sprintf("stop-auto-%s", projectName))
+	} else {
+		r.lockFile = filepath.Join(r.cfg.ConfigDir(), "auto.lock")
+		r.stopFile = filepath.Join(r.cfg.ConfigDir(), "stop-auto")
+	}
+}
+
+// resolveProjectForEpic finds which project owns the given epic and returns its name.
+func (r *Runner) resolveProjectForEpic(epicID string) (string, error) {
+	projects, err := r.projMgr.List()
+	if err != nil {
+		return "", fmt.Errorf("listing projects: %w", err)
+	}
+
+	for _, proj := range projects {
+		cmd := exec.Command("bd", "show", epicID, "--json")
+		cmd.Dir = proj.RepoPath()
+		output, err := cmd.Output()
+		if err != nil {
+			continue
+		}
+
+		var infos []struct {
+			ID        string `json:"id"`
+			IssueType string `json:"issue_type"`
+		}
+		if err := json.Unmarshal(output, &infos); err != nil || len(infos) == 0 {
+			continue
+		}
+		if infos[0].IssueType == "epic" {
+			return proj.Name, nil
+		}
+	}
+
+	return "", fmt.Errorf("epic %s not found in any registered project", epicID)
+}
+
+// findAllAutoLocks returns all per-project lock files in the config directory.
+func (r *Runner) findAllAutoLocks() ([]string, error) {
+	pattern := filepath.Join(r.cfg.ConfigDir(), "auto-*.lock")
+	matches, err := filepath.Glob(pattern)
+	if err != nil {
+		return nil, err
+	}
+	// Also check legacy global lock
+	legacyLock := filepath.Join(r.cfg.ConfigDir(), "auto.lock")
+	if _, err := os.Stat(legacyLock); err == nil {
+		matches = append(matches, legacyLock)
+	}
+	return matches, nil
+}
+
+// projectNameFromLockFile extracts project name from a lock file path.
+// Returns empty string for the legacy global lock.
+func projectNameFromLockFile(lockPath string) string {
+	base := filepath.Base(lockPath)
+	if base == "auto.lock" {
+		return ""
+	}
+	// auto-{project}.lock
+	name := strings.TrimPrefix(base, "auto-")
+	name = strings.TrimSuffix(name, ".lock")
+	return name
 }
 
 // Run executes the auto loop
 func (r *Runner) Run() error {
-	// Handle --stop flag
+	// Handle --stop flag (works without --epic)
 	if r.opts.Stop {
 		return r.signalStop()
 	}
 
-	// Handle --abort flag
-	if r.opts.Abort {
-		return r.abortRun()
+	// Handle --check flag (works without --epic)
+	if r.opts.Check {
+		return r.checkStatus()
 	}
 
-	// Require --epic flag (no longer allows processing all ready beads)
-	if r.opts.Epic == "" && !r.opts.Check {
+	// Require --epic flag for all other operations
+	if r.opts.Epic == "" {
 		return fmt.Errorf("--epic <id> is required\n\nwt auto now requires an epic to process. This prevents accidental batch processing.\n\nUsage:\n  wt auto --epic <epic-id>    Process all beads in an epic\n  wt auto --check             Check status of a running auto session\n\nExample:\n  bd create \"Documentation batch\" -t epic\n  bd dep add wt-tcf wt-doc-epic   # wt-tcf blocks wt-doc-epic (dep of epic)\n  bd dep add wt-1a3 wt-doc-epic\n  wt auto --epic wt-doc-epic")
+	}
+
+	// Resolve project from epic if not already set
+	if r.opts.Project == "" {
+		projName, err := r.resolveProjectForEpic(r.opts.Epic)
+		if err != nil {
+			return err
+		}
+		r.opts.Project = projName
+		r.setProjectPaths(projName)
+	}
+
+	// Handle --abort flag (needs project resolved for state file)
+	if r.opts.Abort {
+		return r.abortRun()
 	}
 
 	// Initialize logger
@@ -103,12 +189,7 @@ func (r *Runner) Run() error {
 	defer logger.Close()
 	r.logger = logger
 
-	// Handle --check flag (status check)
-	if r.opts.Check {
-		return r.checkStatus()
-	}
-
-	// Handle --resume flag
+	// Handle --resume flag (needs project resolved for state file)
 	if r.opts.Resume {
 		return r.resumeRun()
 	}
@@ -494,6 +575,7 @@ func (r *Runner) acquireLock() error {
 		PID:       os.Getpid(),
 		StartTime: time.Now().Format(time.RFC3339),
 		Project:   r.opts.Project,
+		Epic:      r.opts.Epic,
 	}
 
 	data, err := json.MarshalIndent(lock, "", "  ")
@@ -522,17 +604,46 @@ func (r *Runner) isProcessRunning(pid int) bool {
 
 // signalStop signals a running wt auto to stop
 func (r *Runner) signalStop() error {
-	// Check if auto is running
-	if _, err := os.Stat(r.lockFile); os.IsNotExist(err) {
+	// If a specific project is set, stop only that project
+	if r.opts.Project != "" {
+		if _, err := os.Stat(r.lockFile); os.IsNotExist(err) {
+			return fmt.Errorf("no wt auto is running for project %s", r.opts.Project)
+		}
+		if err := os.WriteFile(r.stopFile, []byte(time.Now().Format(time.RFC3339)), 0644); err != nil {
+			return fmt.Errorf("creating stop signal: %w", err)
+		}
+		fmt.Printf("Stop signal sent for project %s. wt auto will stop after the current bead.\n", r.opts.Project)
+		return nil
+	}
+
+	// No project specified: stop all running autos
+	locks, err := r.findAllAutoLocks()
+	if err != nil {
+		return fmt.Errorf("finding lock files: %w", err)
+	}
+	if len(locks) == 0 {
 		return fmt.Errorf("no wt auto is currently running")
 	}
 
-	// Create stop file
-	if err := os.WriteFile(r.stopFile, []byte(time.Now().Format(time.RFC3339)), 0644); err != nil {
-		return fmt.Errorf("creating stop signal: %w", err)
+	for _, lockPath := range locks {
+		projName := projectNameFromLockFile(lockPath)
+		var stopPath string
+		if projName != "" {
+			stopPath = filepath.Join(r.cfg.ConfigDir(), fmt.Sprintf("stop-auto-%s", projName))
+		} else {
+			stopPath = filepath.Join(r.cfg.ConfigDir(), "stop-auto")
+		}
+		if err := os.WriteFile(stopPath, []byte(time.Now().Format(time.RFC3339)), 0644); err != nil {
+			fmt.Printf("Warning: failed to send stop signal for %s: %v\n", lockPath, err)
+			continue
+		}
+		if projName != "" {
+			fmt.Printf("Stop signal sent for project %s.\n", projName)
+		} else {
+			fmt.Println("Stop signal sent (legacy global auto).")
+		}
 	}
-
-	fmt.Println("Stop signal sent. wt auto will stop after the current bead.")
+	fmt.Println("All running autos will stop after their current bead.")
 	return nil
 }
 
@@ -1188,6 +1299,9 @@ func (r *Runner) getEpicTitle(epicID, projectDir string) string {
 
 // Epic state file management
 func (r *Runner) epicStateFile() string {
+	if r.opts.Project != "" {
+		return filepath.Join(r.cfg.ConfigDir(), fmt.Sprintf("auto-epic-state-%s.json", r.opts.Project))
+	}
 	return filepath.Join(r.cfg.ConfigDir(), "auto-epic-state.json")
 }
 
@@ -1217,86 +1331,135 @@ func (r *Runner) removeEpicState() {
 
 // checkStatus shows the status of a running or paused auto session
 func (r *Runner) checkStatus() error {
-	// Check for epic state file
-	state, err := r.loadEpicState()
+	// If a specific project is set (or resolved), check only that project
+	if r.opts.Project != "" {
+		return r.checkStatusForProject(r.opts.Project)
+	}
+
+	// No project specified: show status for all running autos
+	locks, err := r.findAllAutoLocks()
 	if err != nil {
-		// Check lock file
-		if _, err := os.Stat(r.lockFile); os.IsNotExist(err) {
-			fmt.Println("No wt auto session is running.")
+		return fmt.Errorf("finding lock files: %w", err)
+	}
+
+	if len(locks) == 0 {
+		fmt.Println("No wt auto sessions are running.")
+		return nil
+	}
+
+	for i, lockPath := range locks {
+		if i > 0 {
+			fmt.Println()
+		}
+		projName := projectNameFromLockFile(lockPath)
+		if err := r.checkStatusForProject(projName); err != nil {
+			fmt.Printf("Error checking status for %s: %v\n", lockPath, err)
+		}
+	}
+	return nil
+}
+
+// checkStatusForProject shows the status of a running auto for a specific project.
+// Pass empty string for legacy global lock.
+func (r *Runner) checkStatusForProject(projectName string) error {
+	// Temporarily set paths for this project
+	var lockFile, stateFile string
+	if projectName != "" {
+		lockFile = filepath.Join(r.cfg.ConfigDir(), fmt.Sprintf("auto-%s.lock", projectName))
+		stateFile = filepath.Join(r.cfg.ConfigDir(), fmt.Sprintf("auto-epic-state-%s.json", projectName))
+	} else {
+		lockFile = filepath.Join(r.cfg.ConfigDir(), "auto.lock")
+		stateFile = filepath.Join(r.cfg.ConfigDir(), "auto-epic-state.json")
+	}
+
+	// Try epic state file first
+	if data, err := os.ReadFile(stateFile); err == nil {
+		var state EpicState
+		if err := json.Unmarshal(data, &state); err == nil {
+			if projectName != "" {
+				fmt.Printf("wt auto Epic Status [%s]\n", projectName)
+			} else {
+				fmt.Println("wt auto Epic Status")
+			}
+			fmt.Println("-------------------")
+			fmt.Printf("  Epic:       %s\n", state.EpicID)
+			fmt.Printf("  Status:     %s\n", state.Status)
+			fmt.Printf("  Worktree:   %s\n", state.Worktree)
+			fmt.Printf("  Session:    %s\n", state.SessionName)
+			fmt.Printf("  Started:    %s\n", state.StartTime)
+			fmt.Printf("  Progress:   %d/%d beads completed\n", len(state.CompletedBeads), len(state.Beads))
+
+			if state.CurrentBead != "" {
+				fmt.Printf("  Current:    %s\n", state.CurrentBead)
+			}
+			if len(state.FailedBeads) > 0 {
+				fmt.Printf("  Failed:     %d bead(s)\n", len(state.FailedBeads))
+			} else if state.FailedBead != "" {
+				fmt.Printf("  Failed:     %s (%s)\n", state.FailedBead, state.FailureReason)
+			}
+
+			fmt.Println("\nBeads:")
+			for i, beadID := range state.Beads {
+				status := "pending"
+				for _, completed := range state.CompletedBeads {
+					if completed == beadID {
+						status = "✓ completed"
+						break
+					}
+				}
+				if reason, failed := state.FailedBeads[beadID]; failed {
+					status = fmt.Sprintf("✗ failed (%s)", reason)
+				} else if beadID == state.FailedBead {
+					status = "✗ failed"
+				} else if beadID == state.CurrentBead && state.Status == "running" {
+					status = "→ running"
+				}
+				fmt.Printf("  %d. %s [%s]\n", i+1, beadID, status)
+			}
 			return nil
 		}
+	}
 
-		// Read lock info
-		data, err := os.ReadFile(r.lockFile)
-		if err != nil {
-			return fmt.Errorf("reading lock file: %w", err)
-		}
-
-		var lock LockInfo
-		if err := json.Unmarshal(data, &lock); err != nil {
-			return fmt.Errorf("parsing lock file: %w", err)
-		}
-
-		fmt.Println("wt auto Status")
-		fmt.Println("--------------")
-		fmt.Printf("  PID:       %d\n", lock.PID)
-		fmt.Printf("  Started:   %s\n", lock.StartTime)
-		if lock.Epic != "" {
-			fmt.Printf("  Epic:      %s\n", lock.Epic)
-		}
-		if lock.Project != "" {
-			fmt.Printf("  Project:   %s\n", lock.Project)
-		}
-
-		if r.isProcessRunning(lock.PID) {
-			fmt.Printf("  Status:    running\n")
+	// Fall back to lock file
+	if _, err := os.Stat(lockFile); os.IsNotExist(err) {
+		if projectName != "" {
+			fmt.Printf("No wt auto session is running for project %s.\n", projectName)
 		} else {
-			fmt.Printf("  Status:    stale (process not running)\n")
+			fmt.Println("No wt auto session is running.")
 		}
 		return nil
 	}
 
-	// Show epic state
-	fmt.Println("wt auto Epic Status")
-	fmt.Println("-------------------")
-	fmt.Printf("  Epic:       %s\n", state.EpicID)
-	fmt.Printf("  Status:     %s\n", state.Status)
-	fmt.Printf("  Worktree:   %s\n", state.Worktree)
-	fmt.Printf("  Session:    %s\n", state.SessionName)
-	fmt.Printf("  Started:    %s\n", state.StartTime)
-	fmt.Printf("  Progress:   %d/%d beads completed\n", len(state.CompletedBeads), len(state.Beads))
-
-	if state.CurrentBead != "" {
-		fmt.Printf("  Current:    %s\n", state.CurrentBead)
-	}
-	if len(state.FailedBeads) > 0 {
-		fmt.Printf("  Failed:     %d bead(s)\n", len(state.FailedBeads))
-	} else if state.FailedBead != "" {
-		// Backwards compatibility with old state format
-		fmt.Printf("  Failed:     %s (%s)\n", state.FailedBead, state.FailureReason)
+	data, err := os.ReadFile(lockFile)
+	if err != nil {
+		return fmt.Errorf("reading lock file: %w", err)
 	}
 
-	fmt.Println("\nBeads:")
-	for i, beadID := range state.Beads {
-		status := "pending"
-		for _, completed := range state.CompletedBeads {
-			if completed == beadID {
-				status = "✓ completed"
-				break
-			}
-		}
-		// Check FailedBeads map first
-		if reason, failed := state.FailedBeads[beadID]; failed {
-			status = fmt.Sprintf("✗ failed (%s)", reason)
-		} else if beadID == state.FailedBead {
-			// Backwards compatibility
-			status = "✗ failed"
-		} else if beadID == state.CurrentBead && state.Status == "running" {
-			status = "→ running"
-		}
-		fmt.Printf("  %d. %s [%s]\n", i+1, beadID, status)
+	var lock LockInfo
+	if err := json.Unmarshal(data, &lock); err != nil {
+		return fmt.Errorf("parsing lock file: %w", err)
 	}
 
+	if projectName != "" {
+		fmt.Printf("wt auto Status [%s]\n", projectName)
+	} else {
+		fmt.Println("wt auto Status")
+	}
+	fmt.Println("--------------")
+	fmt.Printf("  PID:       %d\n", lock.PID)
+	fmt.Printf("  Started:   %s\n", lock.StartTime)
+	if lock.Epic != "" {
+		fmt.Printf("  Epic:      %s\n", lock.Epic)
+	}
+	if lock.Project != "" {
+		fmt.Printf("  Project:   %s\n", lock.Project)
+	}
+
+	if r.isProcessRunning(lock.PID) {
+		fmt.Printf("  Status:    running\n")
+	} else {
+		fmt.Printf("  Status:    stale (process not running)\n")
+	}
 	return nil
 }
 
