@@ -393,6 +393,18 @@ func (r *Runner) isSessionActive(sessionName string) bool {
 	return true
 }
 
+// waitForShellPrompt waits until the tmux session has no child processes (shell is idle at prompt).
+func (r *Runner) waitForShellPrompt(sessionName string, maxWait time.Duration) {
+	deadline := time.Now().Add(maxWait)
+	for time.Now().Before(deadline) {
+		if !r.isSessionActive(sessionName) {
+			return
+		}
+		time.Sleep(1 * time.Second)
+	}
+	r.logger.Log("Warning: timed out waiting for shell prompt in %s", sessionName)
+}
+
 // buildPrompt builds the prompt from template
 func (r *Runner) buildPrompt(template string, b *bead.ReadyBead, sessionName string, proj *project.Project) string {
 	prompt := template
@@ -775,11 +787,12 @@ func (r *Runner) processEpic() error {
 		r.saveEpicState(state)
 		fmt.Printf("✓ Bead %s completed (commit: %s)\n", b.ID, commitHash)
 
-		// Kill Claude session to start fresh for next bead (prevents context rot)
+		// Ensure Claude has exited before starting next bead (prevents pasting into REPL)
 		if i < len(beads)-1 {
-			fmt.Printf("  Ending Claude session for fresh context on next bead...\n")
+			fmt.Printf("  Ensuring Claude session is terminated for next bead...\n")
 			r.killClaudeSession(state.SessionName)
-			time.Sleep(2 * time.Second)
+			// Wait for shell prompt to be ready
+			r.waitForShellPrompt(state.SessionName, 10*time.Second)
 		}
 	}
 
@@ -1448,13 +1461,13 @@ func (r *Runner) resumeRun() error {
 		r.saveEpicState(state)
 		fmt.Printf("✓ Bead %s completed (commit: %s)\n", b.ID, commitHash)
 
-		// Kill Claude session to start fresh for next bead (prevents context rot)
+		// Ensure Claude has exited before starting next bead (prevents pasting into REPL)
 		// Only if there are more beads to process
 		if i < len(remainingBeads)-1 {
-			fmt.Printf("  Ending Claude session for fresh context on next bead...\n")
+			fmt.Printf("  Ensuring Claude session is terminated for next bead...\n")
 			r.killClaudeSession(state.SessionName)
-			// Brief delay to let shell stabilize before starting new Claude
-			time.Sleep(2 * time.Second)
+			// Wait for shell prompt to be ready
+			r.waitForShellPrompt(state.SessionName, 10*time.Second)
 		}
 	}
 
