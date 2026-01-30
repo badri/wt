@@ -225,4 +225,4 @@ This lets you inspect failures before deciding to continue or abort.
 - **Sequential only**: Beads are processed one at a time in a single worktree
 - **Epic required**: Cannot process arbitrary ready beads without an epic
 - **No intervention**: Auto mode doesn't handle interactive prompts or stuck workers
-- **Single lock**: Only one auto run at a time across all projects
+- **Per-project lock**: Only one auto run per project at a time (parallel runs across different projects are supported)

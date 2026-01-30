@@ -449,7 +449,7 @@ wt auto --check                     # Check status of running auto
 
 ### How It Works
 
-1. Acquires lock (`~/.config/wt/auto.lock`) — only one auto run at a time
+1. Acquires per-project lock (`~/.config/wt/auto-<project>.lock`) — one auto run per project, parallel across projects
 2. Audits the epic: validates beads have descriptions, no external blockers
 3. Creates a **single worktree and tmux session** for the entire epic
 4. For each bead (sequentially):
