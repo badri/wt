@@ -82,9 +82,22 @@ Live TUI dashboard showing all session statuses.
 
 ```bash
 wt watch
+wt watch --auto-nudge
 ```
 
 Updates in real-time as sessions change state.
+
+**Options:**
+
+| Flag | Description |
+|------|-------------|
+| `--auto-nudge` | Auto-detect and nudge stuck/interrupted sessions |
+
+**Auto-nudge** detects two stuck states:
+- **Interrupted** - Claude was interrupted; sends Enter to resume
+- **Idle** - Session idle for 5+ minutes; sends a continue prompt
+
+Nudges are rate-limited (2 minute cooldown per session) and logged to `nudge.log`. Toggle auto-nudge on/off with the `n` key in the TUI.
 
 ### `wt kill <name>`
 

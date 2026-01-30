@@ -124,20 +124,29 @@ Attaches to the tmux session. Use `Ctrl-b d` to detach back to hub.
 ### Monitoring
 
 ```bash
-wt watch            # Interactive TUI dashboard
+wt watch                # Interactive TUI dashboard
+wt watch --auto-nudge   # Enable auto-nudge for stuck sessions
 ```
 
 **Watch TUI controls:**
 - `↑/↓` or `j/k` - Navigate between sessions
 - `Enter` - Switch to selected session
+- `n` - Toggle auto-nudge on/off
 - `r` - Refresh manually
 - `q` - Quit watch
 
 **Watch shows:**
 - All active sessions with color-coded status
 - Status: working (green), idle (yellow), ready (bright green), blocked/error (red)
+- Stuck detection: interrupted or idle sessions highlighted
 - Status message or idle time
 - Auto-refreshes every 5 seconds without flashing
+
+**Auto-nudge** automatically recovers stuck sessions:
+- Interrupted sessions: sends Enter to resume
+- Idle sessions (5+ min): sends a continue prompt
+- Rate-limited: 2 minute cooldown per session
+- Logged to `nudge.log` in config directory
 
 **Tmux pane navigation** (when watch is in side pane):
 - `Ctrl+b ←/→` - Switch between Claude and watch panes
@@ -743,8 +752,9 @@ Workers inherit `BEADS_DIR` from the project, so bd commands inside workers oper
 - Session-bead mapping in `~/.config/wt/sessions.json`
 
 **Worker seems stuck:**
-- `wt watch` to check status
-- `wt <name>` to switch and investigate
+- `wt watch --auto-nudge` to auto-detect and recover stuck sessions
+- `wt watch` then press `n` to toggle auto-nudge interactively
+- `wt <name>` to switch and investigate manually
 - `wt kill <name>` to restart if needed
 
 **Port conflicts:**
@@ -804,7 +814,8 @@ wt list --json | jq 'group_by(.project) | map({project: .[0].project, count: len
 | `wt task <desc>` | Spawn lightweight task session |
 | `wt task <desc> --condition X` | Task with completion condition |
 | `wt <name>` | Switch to session |
-| `wt watch` | Interactive TUI (↑↓ navigate, Enter switch, q quit) |
+| `wt watch` | Interactive TUI (↑↓ navigate, Enter switch, n nudge, q quit) |
+| `wt watch --auto-nudge` | Watch with auto-nudge for stuck sessions |
 | `wt status` | Current session info (in worker) |
 | `wt status --json` | Session status as JSON |
 | `wt signal ready "msg"` | Signal work complete (in worker) |
