@@ -256,9 +256,9 @@ create_api_beads() {
         --type=epic --priority=1 --silent \
         --description="Epic grouping all playground-api synthetic beads for integration testing.")
 
-    # Set dependencies: all beads are children of the epic
+    # Set dependencies: epic depends on all beads (beads block the epic)
     for bead_id in $b1 $b2 $b3 $b4 $b5 $b6 $b7; do
-        bd dep add "$bead_id" "$epic" --quiet 2>/dev/null || true
+        bd dep add "$epic" "$bead_id" --quiet 2>/dev/null || true
     done
 
     # b5 (comprehensive tests) depends on b1 (DELETE endpoint) being done first
@@ -307,7 +307,7 @@ create_web_beads() {
         --description="Epic grouping all playground-web synthetic beads for integration testing.")
 
     for bead_id in $b1 $b2 $b3; do
-        bd dep add "$bead_id" "$epic" --quiet 2>/dev/null || true
+        bd dep add "$epic" "$bead_id" --quiet 2>/dev/null || true
     done
 
     log "Created web beads: $b1 $b2 $b3"
@@ -375,13 +375,13 @@ record_result() {
 
     if [[ "$result" == "PASS" ]]; then
         pass "$scenario"
-        ((PASSED++))
+        PASSED=$((PASSED + 1))
     elif [[ "$result" == "SKIP" ]]; then
         warn "SKIP $scenario${detail:+ — $detail}"
-        ((SKIPPED++))
+        SKIPPED=$((SKIPPED + 1))
     else
         fail "$scenario${detail:+ — $detail}"
-        ((FAILED++))
+        FAILED=$((FAILED + 1))
     fi
 
     echo "[$ts] $result: $scenario ${detail:-}" >> "$logfile"
@@ -402,7 +402,7 @@ scenario_happy_path_dry_run() {
     output=$(wt auto --epic "$API_EPIC" --dry-run 2>&1) || true
 
     # Dry-run should list beads without executing anything
-    if echo "$output" | grep -qi "bead\|ready\|would process\|audit\|preview"; then
+    if echo "$output" | grep -qiE "bead|ready|would process|audit|preview"; then
         # Verify no worktrees were created
         local wt_count
         wt_count=$(git -C "$API_DIR" worktree list 2>/dev/null | wc -l | tr -d ' ')
@@ -431,7 +431,7 @@ scenario_happy_path_real() {
     echo "$output" > "${RESULTS_DIR}/${name}-output.log"
 
     # Check that at least some beads were processed (look for progress indicators)
-    if echo "$output" | grep -qi "processing\|completed\|success\|bead\|merged\|created"; then
+    if echo "$output" | grep -qiE "processing|completed|success|bead|merged|created"; then
         record_result "$name" "PASS"
     elif [[ $exit_code -eq 0 ]]; then
         record_result "$name" "PASS" "Exit 0 (output may vary)"
@@ -455,7 +455,7 @@ scenario_failure_handling() {
     local fail_bead
     fail_bead=$(bd create "Do the impossible: solve P=NP" --type=task --priority=2 --silent \
         --description="Prove whether P equals NP. Provide a formal mathematical proof. This task is intentionally impossible for an automated agent.")
-    bd dep add "$fail_bead" "$fail_epic" --quiet 2>/dev/null || true
+    bd dep add "$fail_epic" "$fail_bead" --quiet 2>/dev/null || true
 
     local output exit_code=0
     output=$(wt auto --epic "$fail_epic" --pause-on-failure --timeout 5 --skip-audit 2>&1) || exit_code=$?
@@ -463,7 +463,7 @@ scenario_failure_handling() {
     echo "$output" > "${RESULTS_DIR}/${name}-output.log"
 
     # We expect either: paused state, non-zero exit, or a failure message
-    if echo "$output" | grep -qi "fail\|pause\|error\|timeout\|stopped"; then
+    if echo "$output" | grep -qiE "fail|pause|error|timeout|stopped"; then
         record_result "$name" "PASS"
     elif [[ $exit_code -ne 0 ]]; then
         record_result "$name" "PASS" "Non-zero exit ($exit_code) as expected"
@@ -489,7 +489,7 @@ scenario_resume() {
     echo "$output" > "${RESULTS_DIR}/${name}-output.log"
 
     # Resume with no paused session should give a clear message (not a crash)
-    if echo "$output" | grep -qi "no.*session\|no.*state\|nothing.*resume\|not found\|no paused\|no auto"; then
+    if echo "$output" | grep -qiE "no.*session|no.*state|nothing.*resume|not found|no paused|no auto"; then
         record_result "$name" "PASS" "Correctly reports no session to resume"
     elif [[ $exit_code -ne 0 ]]; then
         # Non-zero exit is acceptable — it means "nothing to resume"
@@ -527,7 +527,7 @@ scenario_parallel_projects() {
         record_result "$name" "PASS"
     elif [[ $api_exit -eq 0 ]] || [[ $web_exit -eq 0 ]]; then
         # One succeeded — check if the other failed due to locking (which is also valid behavior)
-        if echo "$api_output$web_output" | grep -qi "lock\|already running\|busy"; then
+        if echo "$api_output$web_output" | grep -qiE "lock|is running|already running|busy"; then
             record_result "$name" "PASS" "Per-project lock correctly prevented concurrent runs"
         else
             record_result "$name" "FAIL" "API exit=$api_exit, Web exit=$web_exit"
@@ -550,7 +550,7 @@ scenario_stop() {
     echo "$output" > "${RESULTS_DIR}/${name}-output.log"
 
     # Should gracefully report nothing to stop (not crash)
-    if echo "$output" | grep -qi "no.*running\|no.*session\|not running\|stopped\|no auto\|nothing"; then
+    if echo "$output" | grep -qiE "no.*running|no.*session|not running|stopped|no auto|nothing"; then
         record_result "$name" "PASS" "Correctly reports nothing to stop"
     elif [[ $exit_code -ne 0 ]]; then
         record_result "$name" "PASS" "Exit $exit_code (nothing running)"
@@ -572,7 +572,7 @@ scenario_abort() {
 
     echo "$output" > "${RESULTS_DIR}/${name}-output.log"
 
-    if echo "$output" | grep -qi "no.*session\|no.*state\|nothing.*abort\|not found\|cleaned\|no auto\|nothing"; then
+    if echo "$output" | grep -qiE "no.*session|no.*state|nothing.*abort|not found|cleaned|no auto|nothing"; then
         record_result "$name" "PASS" "Correctly reports nothing to abort"
     elif [[ $exit_code -ne 0 ]]; then
         record_result "$name" "PASS" "Exit $exit_code (nothing to abort)"
@@ -592,7 +592,7 @@ scenario_check_status() {
     echo "$output" > "${RESULTS_DIR}/${name}-output.log"
 
     # Should report status without crashing
-    if echo "$output" | grep -qi "no.*running\|no.*session\|status\|idle\|not running\|no auto"; then
+    if echo "$output" | grep -qiE "no.*running|no.*session|status|idle|not running|no auto"; then
         record_result "$name" "PASS" "Status check works"
     elif [[ $exit_code -ne 0 ]]; then
         record_result "$name" "PASS" "Exit $exit_code (no active session)"
