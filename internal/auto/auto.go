@@ -1028,10 +1028,9 @@ func (r *Runner) createEpicWorktree(epicID string, _ *project.Project) (string, 
 	}
 	sessionName = "auto-" + sessionName
 
-	// Create worktree using wt new with --no-prompt flag.
-	// Claude will start interactively but wt new won't send the generic prompt.
-	// We'll send our batch-aware epic prompt via NudgeSession after Claude initializes.
-	args := []string{"new", epicID, "--no-switch", "--name", sessionName, "--no-prompt"}
+	// Create worktree with --shell flag so Claude doesn't auto-start.
+	// runClaudeInSession will launch claude from the shell prompt with the bead prompt.
+	args := []string{"new", epicID, "--no-switch", "--name", sessionName, "--shell"}
 	if r.opts.Project != "" {
 		args = append(args, "--project", r.opts.Project)
 	}
