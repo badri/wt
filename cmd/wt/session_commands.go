@@ -32,6 +32,7 @@ type newFlags struct {
 	noTestEnv   bool
 	shell       bool // Start with shell only, don't launch Claude
 	noPrompt    bool // Start Claude but don't send initial prompt (for wt auto)
+	force       bool // Override safety checks (e.g., epic guard)
 }
 
 // cmdNewHelp shows detailed help for the new command
@@ -58,6 +59,7 @@ OPTIONS:
     --no-test-env       Skip test environment setup
     --shell             Create session with shell only (don't start Claude)
     --no-prompt         Start Claude but don't send initial prompt (for wt auto)
+    --force             Override safety checks (e.g., allow spawning on epics)
     -h, --help          Show this help
 
 EXAMPLES:
@@ -282,6 +284,8 @@ func parseNewFlags(args []string) (beadID string, flags newFlags) {
 			flags.shell = true
 		case "--no-prompt":
 			flags.noPrompt = true
+		case "--force":
+			flags.force = true
 		}
 	}
 	return
@@ -773,6 +777,11 @@ func cmdNew(cfg *config.Config, args []string) error {
 	beadInfo, err := bead.ShowFullInDir(beadID, beadsDir)
 	if err != nil {
 		return fmt.Errorf("bead not found: %s", beadID)
+	}
+
+	// Guard: block spawning workers on epics unless --force
+	if beadInfo.IssueType == "epic" && !flags.force {
+		return fmt.Errorf("cannot spawn worker for epic '%s'. Use one of:\n  wt auto --epic %s    # process all children sequentially\n  wt new <child-id>       # spawn a specific child bead\n  wt new %s --force    # override (advanced)", beadID, beadID, beadID)
 	}
 
 	// Allocate name from themed pool
