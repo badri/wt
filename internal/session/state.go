@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/badri/wt/internal/config"
+	"github.com/badri/wt/internal/tmux"
 )
 
 type State struct {
@@ -57,6 +58,24 @@ func (s *State) UsedNames() []string {
 		}
 	}
 	return names
+}
+
+// PruneStaleSessions removes entries from sessions.json whose tmux session
+// no longer exists. Returns the number of pruned entries.
+func (s *State) PruneStaleSessions() (int, error) {
+	pruned := 0
+	for name := range s.Sessions {
+		if !tmux.SessionExists(name) {
+			delete(s.Sessions, name)
+			pruned++
+		}
+	}
+	if pruned > 0 {
+		if err := s.Save(); err != nil {
+			return pruned, err
+		}
+	}
+	return pruned, nil
 }
 
 func (s *State) FindByBead(beadID string) (string, *Session) {

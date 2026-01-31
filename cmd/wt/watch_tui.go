@@ -150,6 +150,9 @@ func loadSessionsCmd(cfg *config.Config, autoNudge bool, nudger *monitor.Nudger)
 			return sessionsMsg{}
 		}
 
+		// Prune sessions whose tmux session no longer exists
+		state.PruneStaleSessions()
+
 		var items []sessionItem
 		for name, sess := range state.Sessions {
 			status := sess.Status
